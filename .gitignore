@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python build artifacts
+*.egg-info/
+.eggs/
+build/
+
+# Node / frontend
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Local storage
+storage/uploads/
+storage/cache/
+storage/sqlite/*.db
+storage/sqlite/*.db-*
+storage/sqlite/*.sqlite
+storage/sqlite/*.sqlite-*
+
+# Logs
+*.log
+
+# Reference-only cloned repo
+fbm-sniper-community/
+
+
+pics_of_clothes_i_like/
+
+# Prompt-iteration experiment outputs
+scripts/out_*.json
+scripts/grid_*.jpg
+
+vinted_dump/*
+storage/

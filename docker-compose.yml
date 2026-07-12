@@ -1,0 +1,134 @@
+# Local development stack: live-reload backend, Vite dev server, Traefik gateway.
+#
+# The whole stack is UNAUTHENTICATED and bound to 127.0.0.1 — it must never be
+# reachable off-host. Production (auth + built bundle) is docker-compose.coolify.yml.
+#
+# KEEP IN SYNC: the api/worker `build` context and healthchecks are duplicated in
+# docker-compose.coolify.yml (Compose can't share them across files without
+# breaking Coolify's single-file model). Change both when you touch either.
+services:
+  traefik:
+    image: traefik:v3
+    restart: unless-stopped
+    environment:
+      - DOCKER_API_VERSION=1.44
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    # Loopback-only: the dev gateway is unauthenticated.
+    ports:
+      - "127.0.0.1:${APP_PORT:-80}:80"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - app
+    depends_on:
+      - api
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=vsniper_app"
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+    networks:
+      - app
+    command: uvicorn vsniper.api.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src --app-dir /app/src
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      # Public Webhook (no auth — Telegram must reach it)
+      - "traefik.http.routers.api-webhook.rule=Path(`/api/telegram/webhook`) && Method(`POST`)"
+      - "traefik.http.routers.api-webhook.entrypoints=web"
+      - "traefik.http.routers.api-webhook.service=api-service"
+      - "traefik.http.routers.api-webhook.priority=100"
+      # REST API (no auth in dev — gateway is loopback-only)
+      - "traefik.http.routers.api.rule=PathPrefix(`/api`) || PathPrefix(`/healthz`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.routers.api.service=api-service"
+      - "traefik.http.routers.api.priority=50"
+      # Service definition
+      - "traefik.http.services.api-service.loadbalancer.server.port=8000"
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - ./.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+    networks:
+      - app
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    command: python -m vsniper.worker.scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import pathlib, sys; sys.exit(0 if any('vsniper.worker.scheduler' in p.joinpath('cmdline').read_text(errors='ignore').replace('\\0', ' ') for p in pathlib.Path('/proc').iterdir() if p.name.isdigit()) else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  web:
+    build:
+      context: ./web
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      VITE_DEV_PROXY_TARGET: http://api:8000
+    # Loopback-only: the Vite dev server proxies /api to the backend with no
+    # auth. Reach the full stack at either http://127.0.0.1:${WEB_PORT} (Vite,
+    # hot reload) or the Traefik gateway on http://127.0.0.1:${APP_PORT}.
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    networks:
+      - app
+    depends_on:
+      api:
+        condition: service_healthy
+    command: npm run dev -- --host 0.0.0.0
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:5173', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      # Dashboard (no auth in dev — gateway is loopback-only)
+      - "traefik.http.routers.web.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.web.entrypoints=web"
+      - "traefik.http.routers.web.service=web-service"
+      - "traefik.http.routers.web.priority=10"
+      # Service definition
+      - "traefik.http.services.web-service.loadbalancer.server.port=5173"
+
+volumes:
+  web_node_modules:
+
+networks:
+  app:
