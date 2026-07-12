@@ -1,105 +1,101 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
-## Clean-room rule
+## Non-negotiable rules
 
-`fbm-sniper-community/` is a cloned upstream project kept **only** as human-readable reference material. It is not part of the runtime, is gitignored, and you must not import, copy, or transliterate code from it into `backend/`, `web/`, or anywhere else in the new tree. Concepts and patterns are fair game; lines of code are not.
+- Vinted support is intentionally limited to the `de` region. Do not introduce multi-region branches or fixtures.
+- Keep API routes and worker jobs thin. Business logic belongs in the relevant module under `backend/src/vsniper/services/`.
+- Keep `AppState` as a resource/service facade; do not add business methods to it.
+- Search-run coordination uses database-backed claims. Do not add a competing in-process lock.
+- Preserve unrelated working-tree changes.
 
-## Common commands
+## Commands
 
-Backend (run from repo root, `backend/` is a `uv`/pip editable install targeting Python 3.12):
+Run backend commands from the repository root:
 
-- Install dev deps: `uv sync --project backend --extra dev` (lockfile at `backend/uv.lock`)
-- Run API: `uv run --project backend uvicorn vsniper.api.main:app --reload --app-dir backend/src`
-- Run worker loop: `uv run --project backend python -m vsniper.worker.scheduler` (add `--once` for a single cycle, `--interval N` to change cadence)
-- Tests: `uv run --project backend --extra dev pytest backend/tests` — single test: `... pytest backend/tests/test_vinted_client.py::test_name`
-- Lint / type-check: `uv run --project backend --extra dev ruff check backend/src backend/tests` and `uv run --project backend --extra dev mypy backend/src`
+```bash
+uv sync --project backend --extra dev
+uv run --project backend uvicorn vsniper.api.main:app --reload --app-dir backend/src
+uv run --project backend python -m vsniper.worker.scheduler
+uv run --project backend python -m vsniper.worker.scheduler --once
+uv run --project backend --extra dev pytest backend/tests
+uv run --project backend --extra dev ruff check backend/src backend/tests
+uv run --project backend --extra dev mypy backend/src
+```
 
-Web (run from `web/`):
+Run one backend test with its node ID, for example:
 
-- `npm run dev` — Vite dev server (port 5173, proxies `/api` to the backend; in Compose the target is `VITE_DEV_PROXY_TARGET`)
-- `npm run build` — `tsc -b && vite build`
-- `npm run preview` — preview the built bundle
+```bash
+uv run --project backend --extra dev pytest backend/tests/test_vinted_client.py::test_name
+```
 
-Full stack: `docker compose up --build` brings up `api`, `worker`, and `web` against the mounted `./storage` and `.env`. Copy `.env.example` to `.env` before running.
+Run web commands from `web/`:
 
-## Prompt-iteration scripts (untracked)
+```bash
+npm ci
+npm run dev
+npm run build
+```
 
-`scripts/iter_prompts.py` and `scripts/iter_judge.py` exist to A/B prompt variants against the user's own reference photos in `pics_of_clothes_i_like/`. They hit the live OpenAI API using credentials from `.env`, so they cost a few cents per run. Their JSON / JPEG outputs are gitignored. Use them whenever you change a meta-prompt — run `current` and `revised` variants side-by-side and compare numerically before editing `backend/src/vsniper/integrations/openai/client.py`.
+Start the local stack with `docker compose up --build` after copying `.env.example` to `.env`. The development stack is unauthenticated and must remain bound to localhost.
 
 ## Architecture
 
-### Two-process backend, one shared state layer
+The FastAPI process and worker share `storage/sqlite/vsniper.db`. Both enter through `vsniper.core.state.get_state()`, whose `AppState` owns integration clients, database lifecycle, and four domain services:
 
-The backend ships as **two processes** that share a single SQLite database under `storage/sqlite/vsniper.db`:
+- `state.taste` / `state.preferences`: wardrobe and offer samples, observations, taste recompute, profiles, and anchors
+- `state.candidates`: candidates, feedback, dashboard statistics, score distributions, and AI costs
+- `state.searches`: saved searches, scan execution, judging, run claims, and app settings
+- `state.telegram`: webhook handling and queued alert delivery
 
-1. **API** (`vsniper.api.main:app`) — FastAPI app composed of routers in `vsniper/api/routes/` (health, stats, searches, taste, candidates, settings, telegram). Each route delegates to one of the four services on `AppState`.
-2. **Worker** (`vsniper.worker.scheduler`) — a loop that, per cycle, (a) scans every enabled search in parallel via `worker/jobs/scan_search.py`, then (b) drains the Telegram alert delivery queue via `worker/jobs/process_deliveries.py`. The scheduler uses `state.searches.claim_for_run(...)` as a DB-backed lock so multiple workers can coexist; **do not** add an in-process lock alongside it.
+Other service modules handle focused concerns such as AI-model configuration, operations, maintenance, backups, and storage. Routes may call these modules directly, but persistence and business rules still stay out of route handlers.
 
-Both processes call `vsniper.core.state.get_state()` which returns the same `AppState` instance defined in `vsniper/core/sqlite_state.py`. `AppState` is a **thin facade** (~200 lines) that owns shared resources (Settings, integration clients, DB lifecycle) and exposes four services:
+The continuous worker staggers enabled searches across the configured scan interval. Delivery processing, cookie checks, pruning, and heartbeats run on a separate maintenance cadence. `--once` scans all enabled searches and then runs maintenance.
 
-- `state.taste` (also aliased as `state.preferences`) — `services/taste_service.py`: wardrobe sample CRUD, offer sample management, taste profile recompute (`recompute()` orchestrates describe_reference_images → build_taste_profile), `active_taste_profile()`, and `latest_labeled_anchors()` for judge calibration
-- `state.candidates` — `services/candidate_service.py`: candidate listing, feedback recording (`record_feedback_in_session`), candidate-image observation capture on vote, dashboard stats, AI cost stats
-- `state.telegram` — `services/telegram_service.py`: webhook registration/validation, outbound delivery queue/retry/processing, inbound callback handling, message edits
-- `state.searches` — `services/search_service.py`: search CRUD, scan orchestration (`_run` → `_judge_candidates`), DB-backed run claim, session-health refresh, settings get/update (`get_app_settings`/`update_app_settings`)
+SQLite uses WAL mode and a five-second busy timeout. Startup runs `alembic upgrade head` under a migration lock. Filesystem state belongs under `storage/`:
 
-Cross-service wiring (set up in `AppState.__init__`): `SearchService` calls into `TasteService` (for the active taste profile and labeled anchors during scan) and `TelegramService` (to queue deliveries); `TelegramService` calls into `CandidateService` (for `record_feedback_in_session` during webhook handling). Shared contract↔model converters and env-derived helpers live in `services/_mapping.py` as module-level functions.
+- `storage/sqlite/vsniper.db`
+- `storage/uploads/`
+- `storage/cache/`
+- `storage/feedback-assets/`
 
-Rule of thumb: business logic belongs in the relevant service. API routes and worker jobs stay thin — they pull `get_state()` and call a service method. If you find yourself reaching into SQLAlchemy models from a route or job, move it into the matching service instead. Don't add new methods directly to `AppState`; the facade should keep shrinking, not growing.
+## Contracts and persistence
 
-### Domain contracts are the wire format
+`backend/src/vsniper/domain/contracts.py` contains the Pydantic wire contracts used by the API and services. Mirror contract changes in `web/src/types.ts`. SQLAlchemy models in `backend/src/vsniper/db/models.py` are internal persistence shapes; keep conversions in services, primarily `services/_mapping.py`.
 
-`vsniper/domain/contracts.py` defines Pydantic models (`SearchRecord`, `CandidateRecord`, `TasteProfile`, `ScoreTrace`, `TelegramWebhookResult`, etc.) used as both the FastAPI response schemas and the internal data shape. The web client mirrors these in `web/src/types.ts` — when you change a contract, update both sides. The SQLAlchemy models in `vsniper/db/models.py` are an **internal** persistence shape distinct from the contracts; `AppState` converts between them.
+After changing a database model, generate and review a migration:
 
-### Clothing item taste buckets
+```bash
+uv run --project backend --extra dev alembic -c backend/alembic.ini revision --autogenerate -m "your message"
+```
 
-Taste is item-specific. The fixed `ClothingItem` buckets are:
+Never treat an autogenerated migration as finished without inspecting its upgrade and downgrade paths.
 
-- `schuhe` / Schuhe — shoes and sneakers
-- `hosen` / Hosen — trousers, jeans, cargos, shorts, and other legwear
-- `obenrum_warm` / Obenrum Warm — warm upper-body pieces such as T-shirts and short-sleeve shirts
-- `obenrum_mittel` / Obenrum Mittel — mid-layer tops such as longsleeves and light pullovers
-- `obenrum_kalt` / Obenrum Kalt — cold-weather upper-body pieces such as heavy pullovers and jackets
-- `kopf` / Kopf — headwear, especially funny/weird baseball caps
+## Domain invariants
 
-Every wardrobe sample, generated search draft, saved search, candidate, reference observation, and feedback example carries `clothing_item`. `TasteProfile` is still the top-level recompute artifact, but it contains one `ClothingItemTasteProfile` per bucket. Each item profile has its own prompt, rubric, transparency labels, and exactly one generated Vinted search draft.
+The six `ClothingItem` values are `schuhe`, `hosen`, `obenrum_warm`, `obenrum_mittel`, `obenrum_kalt`, and `kopf`. Wardrobe samples, observations, generated drafts, searches, candidates, and feedback retain their clothing bucket.
 
-Cross-item leakage is intentional: an item profile should be strongest on evidence from its own bucket, but `cross_item_influence` should carry broader wardrobe taste from other buckets (palette, era, texture, humor, subculture, silhouette principles) without forcing exact garment matches. At scan time, `SearchService` selects the item profile for `Search.clothing_item`; feedback inherits the candidate/search bucket so the next recompute can separate direct evidence from cross-item influence.
+Taste recompute builds an item profile and generated search per bucket. Same-bucket evidence is strongest; `cross_item_influence` carries broader style signals between buckets. Feedback is accumulated as evidence for a later recompute, not applied as an immediate weight adjustment.
 
-### VLM scoring pipeline
+Candidate judgments use integer scores from 1–100. The default alert threshold is 95 and may be overridden per search; scores from 50 up to the alert threshold are `review`, and lower scores are `discard`. Failed judgments produce discard traces.
 
-Every scan sends every fetched candidate to VLM judging so each alert/discard is explainable:
+Candidates without a reusable current-profile trace go through vision judging in configurable grid batches. Failed or stale-profile judgments are retried. Keep output structured and explainable, including the score, explanation, labels, and concerns.
 
-**VLM grid judging** (`SearchService._judge_candidates` → `OpenAITasteClient.judge_candidate_grid`) — all fetched candidates with usable images are assembled into 1-, 4-, or 9-image contact-sheet batches and sent to the configured judge model. The number of concurrent grid requests is controlled by `vlm_judge_parallel_requests`. The model returns a structured 1–10 score, explanation, labels, and concerns per position. `build_judgment_trace` converts each score to a `ScoreTrace`: score ≥ 7 → `alert`, ≥ 5 → `review`, < 5 → `discard`. If image download fails or the model returns null for a position, `build_failed_judgment_trace` produces a `discard` trace tagged `failed`.
+Vinted session validation, search execution, and listing normalization are separate concerns in `integrations/vinted/client.py`. Parser changes require fixture-backed tests; add or update a saved `de` fixture instead of weakening assertions.
 
-The judge model can be OpenAI-backed or local. `ai_judge_provider == "local"` means judging only: `OpenAITasteClient.judge_candidate_grid()` must call `POST {LOCAL_VLM_BASE_URL}/responses`, never `/chat/completions`. Local calls use `local_judge_model`, send llama.cpp-style top-level `json_schema`, omit `reasoning`, and use a simplified occupied-position grid schema; OpenAI calls and optional local fallback use `ai_judge_model`. OpenAI Responses `text.format` was tested against llama.cpp and accepted but not enforced. Taste recompute and image-description learning remain OpenAI-backed.
+Telegram alerts are durable delivery rows with bounded retries. Web and Telegram feedback must converge on the same candidate-feedback path.
 
-Feedback learning works through `TasteService.recompute()`, not a per-vote weight nudge: user likes/dislikes accumulate as `TasteSampleState` rows with their clothing bucket; `recompute` calls `describe_reference_images` on wardrobe images, then `build_taste_profile` with observations + offer examples + the manual note, producing a new `TasteProfile` with per-item rubrics, prompts, and search drafts. The profile is marked dirty whenever feedback is recorded, as a signal that recompute is due.
+## Web app
 
-### Vinted integration
+The web client uses React, Vite, TypeScript, React Router, and TanStack Query. Keep HTTP calls in `web/src/lib/api.ts`, use `/api/*` paths, and never hardcode a backend origin. Shared clothing-item metadata belongs in `web/src/lib/clothingItems.ts`.
 
-`integrations/vinted/client.py` is a live cookie-authenticated HTTP adapter (not a fixture stub) with three concerns kept separate per `docs/scraping-strategy.md`: session validation (cached for 15 min via `SESSION_HEALTH_TTL`), search execution, and listing normalization. Parser behavior is locked by fixture-driven tests — when changing parsing, add or update a saved fixture in `backend/tests/` rather than relaxing assertions.
+When backend contracts change, update the TypeScript mirror and run `npm run build`.
 
-**Only the `de` region is supported and ever needs to be.** Do not add multi-region handling, region-conditional logic, or fixtures for other regions.
+## Prompt changes
 
-### Telegram integration
+Prompt experiments under `scripts/iter_*.py` use the live OpenAI API and the user's local reference photos, so they incur cost and produce gitignored outputs. Before changing a meta-prompt in `backend/src/vsniper/integrations/openai/client.py`, run the relevant current and revised variants side by side and compare their output. Use `scripts/iter_prompts.py` for observation/taste prompts and the applicable `scripts/iter_judge*.py` harness for judge prompts.
 
-Outbound delivery is driven by `AlertDeliveryState` rows: candidates that score `decision == "alert"` get a delivery row queued, the worker picks them up, calls `TelegramClient`, and writes back `sent` / retry-pending (up to `DELIVERY_MAX_ATTEMPTS = 3` with backoff `DELIVERY_RETRY_DELAYS`) / `failed`. Inbound feedback comes through `POST /api/telegram/webhook`; `TelegramFormatter.parse_feedback_callback_data` decodes the `feedback:<delivery_id>:<verdict>` payload, and `AppState` resolves the delivery back to a candidate and runs the same `apply_feedback` path as the web UI. `TELEGRAM_WEBHOOK_SECRET`, if set, is enforced on inbound requests.
+## Verification
 
-### Configuration & storage layout
-
-`vsniper.core.config.Settings` (pydantic-settings) loads from `.env` and resolves relative paths against the repo root (discovered by walking up to `docker-compose.yml`). All filesystem state lives under `storage/`:
-
-- `storage/sqlite/vsniper.db` — app DB (WAL mode, 5s busy timeout, configured in `core/database.py`)
-- `storage/uploads/` — preference reference images
-- `storage/cache/` — cached listing assets
-
-Schema migrations are managed by Alembic (`backend/alembic.ini`, `backend/alembic/`). `init_database()` runs `alembic upgrade head` on startup, so the DB is brought to the current revision automatically. To add a migration after changing a SQLAlchemy model: `uv run --project backend --extra dev alembic revision --autogenerate -m "your message"`, review the generated file under `backend/alembic/versions/`, then commit.
-
-### Web app
-
-React 18 + Vite + TypeScript + React Router + TanStack Query. One page per top-level concept (`DashboardPage`, `SearchesPage`, `MyTastePage`, `CandidatesPage`, `CostsPage`, `SettingsPage`), all sharing `web/src/lib/api.ts` as the single fetch wrapper. All backend calls hit `/api/*` and rely on the Vite proxy (or the deployed reverse proxy) — do not hardcode the backend origin.
-
-- **MyTastePage** — wardrobe samples grouped by clothing item, upload/edit controls for the clothing bucket, offer like/dislike history, free-text taste note, recompute button, item-specific profile tabs, and generated search drafts with save-to-searches action.
-- **CostsPage** — AI spend broken down by stage (judge / learning) and time window (24 h / 7 d / 30 d / all time), backed by `CandidateService.get_ai_cost_stats()`.
+Run the narrowest relevant tests while iterating. Before handing off a backend change, run the affected tests plus Ruff and mypy. For web changes, run `npm run build`. For cross-stack contract changes, verify both sides.
