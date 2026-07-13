@@ -32,6 +32,8 @@ vite.config.d.ts
 .DS_Store
 .vscode/
 .idea/
+/.antigravitycli/
+/.claude/
 
 # Local storage
 storage/uploads/
