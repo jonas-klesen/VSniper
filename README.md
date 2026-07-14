@@ -1,4 +1,6 @@
-# vsniper
+Blog post [here](https://jonas-klesen.de/blog/vsniper/).
+
+# VSniper
 
 A Vinted clothes-discovery app that learns your taste from wardrobe photos and feedback, scores new listings with vision models, and sends strong matches to Telegram.
 
