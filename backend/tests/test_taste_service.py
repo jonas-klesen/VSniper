@@ -97,6 +97,61 @@ def test_add_offer_hydrates_vinted_listing(monkeypatch, tmp_path) -> None:
     assert sample.normalized_listing["raw_listing"] == {"id": 12345}
 
 
+def test_add_offer_reuses_candidate_and_copies_cached_image(monkeypatch, tmp_path) -> None:
+    service = _setup(monkeypatch, tmp_path)
+    factory = service._test_factory
+    now = datetime.now(UTC)
+    with factory() as session:
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(
+            Candidate(
+                id="s1:12345",
+                external_item_id="12345",
+                clothing_item="hosen",
+                search_id="s1",
+                title="Cached cargos",
+                brand="Cached brand",
+                price_eur=28.0,
+                size="M",
+                url="https://www.vinted.de/items/12345-cached-cargos",
+                image_urls=["https://images1.vinted.net/item.jpg"],
+                matched_filters=[],
+                matched_preferences=[],
+                features=[],
+                normalized_listing={"description": "Cached description", "raw_listing": {"id": 12345}},
+                score_trace={},
+                decision="review",
+                final_score=70,
+                created_at=now,
+                last_seen_at=now,
+            )
+        )
+        session.commit()
+
+    candidate_cache = tmp_path / "cache" / "candidate-images" / "s1_12345.jpg"
+    candidate_cache.parent.mkdir(parents=True)
+    candidate_cache.write_bytes(b"cached image")
+
+    class FakeVintedClient:
+        def fetch_item_by_url(self, *args, **kwargs):
+            raise AssertionError("known candidates must not be fetched from Vinted")
+
+    service.vinted_client = FakeVintedClient()
+    sample = service.add_offer(
+        TasteOfferCreate(
+            vinted_url="https://www.vinted.de/items/12345-any-slug",
+            clothing_item="hosen",
+        )
+    )
+
+    assert sample.title == "Cached cargos"
+    assert sample.candidate_id == "s1:12345"
+    assert len(sample.cached_image_paths) == 1
+    copied = tmp_path / "cache" / sample.cached_image_paths[0]
+    assert copied.read_bytes() == b"cached image"
+    assert candidate_cache.read_bytes() == b"cached image"
+
+
 def test_candidate_feedback_sample_uses_durable_images(monkeypatch, tmp_path) -> None:
     service = _setup(monkeypatch, tmp_path)
     factory = service._test_factory

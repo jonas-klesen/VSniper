@@ -9,7 +9,13 @@ import httpx
 import pytest
 
 from vsniper.domain.contracts import SearchFilter, SearchRecord
-from vsniper.integrations.vinted.client import VintedClient, VintedListingUrlError, VintedSessionError
+from vsniper.integrations.vinted.browser import BrowserListingChallengeError
+from vsniper.integrations.vinted.client import (
+    VintedBrowserActionError,
+    VintedClient,
+    VintedListingUrlError,
+    VintedSessionError,
+)
 
 
 def _jwt_with_expiry(expiry: datetime) -> str:
@@ -328,9 +334,61 @@ def test_fetch_item_by_url_retries_anonymously_after_stale_cookie_redirect(monke
     assert cookies[1] is None
 
 
+def test_fetch_item_by_url_uses_browser_transport_when_configured(monkeypatch) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+
+    class FakeBrowser:
+        def fetch_html(self, url: str, *, cookie_header: str) -> str:
+            assert url == 'https://www.vinted.test/items/12345-wide-black-cargos'
+            assert cookie_header == ''
+            return '''
+                <link rel="canonical" href="https://www.vinted.test/items/12345-wide-black-cargos">
+                <meta property="og:title" content="Wide black cargos | Vinted">
+                <meta property="og:image" content="https://images.vinted.example/12345.jpg">
+            '''
+
+    client = VintedClient(base_url='https://www.vinted.test', browser_client=FakeBrowser())  # type: ignore[arg-type]
+    listing = client.fetch_item_by_url(
+        'https://www.vinted.test/items/12345-wide-black-cargos',
+        clothing_item='hosen',
+    )
+
+    assert listing['external_item_id'] == '12345'
+    assert listing['title'] == 'Wide black cargos'
+
+
+def test_fetch_item_by_url_maps_browser_challenge_to_actionable_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+
+    class FakeBrowser:
+        def fetch_html(self, url: str, *, cookie_header: str) -> str:
+            raise BrowserListingChallengeError("verification required")
+
+    client = VintedClient(base_url='https://www.vinted.test', browser_client=FakeBrowser())  # type: ignore[arg-type]
+    with pytest.raises(VintedBrowserActionError) as exc_info:
+        client.fetch_item_by_url(
+            'https://www.vinted.test/items/12345-wide-black-cargos',
+            clothing_item='hosen',
+        )
+
+    assert exc_info.value.code == 'vinted_browser_challenge'
+    assert exc_info.value.recovery_path == '/vinted-browser/?autoconnect=1&resize=scale'
+
+
 def test_fetch_item_by_url_rejects_non_item_urls() -> None:
     with pytest.raises(VintedListingUrlError, match="/items/<id>"):
         VintedClient._item_id_from_url("https://www.vinted.de/member/123")
+
+
+def test_fetch_item_by_url_rejects_non_german_vinted_domain() -> None:
+    with pytest.raises(VintedListingUrlError, match="vinted.de"):
+        VintedClient._item_id_from_url("https://www.vinted.com/items/123-item")
 
 
 def test_item_id_from_url_accepts_listing_url_without_scheme() -> None:

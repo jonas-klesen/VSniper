@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     sqlite_path: Path = Field(default=Path("storage/sqlite/vsniper.db"), alias="SQLITE_PATH")
     vinted_region: str = Field(default="de", alias="VINTED_REGION")
     vinted_cookie: str = Field(default="put-your-vinted-cookie-here", alias="VINTED_COOKIE")
+    vinted_browser_webdriver_url: str = Field(
+        default="http://browser:4444/wd/hub",
+        alias="VINTED_BROWSER_WEBDRIVER_URL",
+    )
+    vinted_browser_proxy_url: str = Field(default="", alias="VINTED_BROWSER_PROXY_URL")
+    vinted_browser_timeout_seconds: int = Field(default=30, alias="VINTED_BROWSER_TIMEOUT_SECONDS")
+    vinted_browser_profile_dir: Path = Field(
+        default=Path("/app/browser-profile"),
+        alias="VINTED_BROWSER_PROFILE_DIR",
+    )
     telegram_bot_token: str = Field(default="put-your-telegram-bot-token-here", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="put-your-telegram-chat-id-here", alias="TELEGRAM_CHAT_ID")
     telegram_webhook_url: str = Field(

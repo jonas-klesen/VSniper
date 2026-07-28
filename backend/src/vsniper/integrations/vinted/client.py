@@ -16,6 +16,12 @@ import httpx
 
 from vsniper.core.config import get_settings
 from vsniper.domain.contracts import CandidateFeature, ClothingItem, SearchRecord, SessionHealth
+from vsniper.integrations.vinted.browser import (
+    BrowserListingChallengeError,
+    BrowserListingUnconfiguredError,
+    BrowserListingUnavailableError,
+    VintedBrowserClient,
+)
 from vsniper.integrations.vinted.category_aliases import CATEGORY_ALIAS_IDS
 
 
@@ -162,6 +168,13 @@ class VintedListingUrlError(VintedClientError):
         super().__init__(message, retryable=False)
 
 
+class VintedBrowserActionError(VintedClientError):
+    def __init__(self, message: str, *, code: str, recovery_path: str | None = None) -> None:
+        super().__init__(message, retryable=True, status_code=503)
+        self.code = code
+        self.recovery_path = recovery_path
+
+
 class VintedClient:
     def __init__(
         self,
@@ -169,12 +182,14 @@ class VintedClient:
         base_url: str | None = None,
         timeout: float = 20.0,
         client: httpx.Client | None = None,
+        browser_client: VintedBrowserClient | None = None,
         on_tokens_refreshed: Callable[[str, str], None] | None = None,
     ) -> None:
         self.settings = get_settings()
         self.base_url = base_url.rstrip("/") if base_url else None
         self.timeout = timeout
         self._client = client
+        self._browser_client = browser_client
         self._session_health_cache: dict[str, SessionHealth] = {}
         self._filter_option_cache: dict[FilterOptionCacheKey, tuple[datetime, list[dict[str, Any]]]] = {}
         self._cookie_override: str | None = None
@@ -456,9 +471,9 @@ class VintedClient:
         return normalized
 
     def fetch_item_by_url(self, url: str, *, clothing_item: ClothingItem, region: str = "de") -> dict[str, Any]:
-        item_id = self._item_id_from_url(url)
+        item_id = self.listing_id_from_url(url)
         item = self._fetch_listing_page(
-            path=self._listing_path_from_url(url),
+            path=self._listing_path_for_client(url),
             item_id=item_id,
             region=region,
         )
@@ -483,6 +498,30 @@ class VintedClient:
         JavaScript executes.
         """
         url = f"{self._base_url_for_region(region)}{path}"
+        if self._browser_client is not None:
+            try:
+                page_text = self._browser_client.fetch_html(
+                    url,
+                    cookie_header=self._cookie_header_value() or "",
+                )
+            except BrowserListingChallengeError as exc:
+                raise VintedBrowserActionError(
+                    str(exc),
+                    code="vinted_browser_challenge",
+                    recovery_path="/vinted-browser/?autoconnect=1&resize=scale",
+                ) from exc
+            except BrowserListingUnconfiguredError as exc:
+                raise VintedBrowserActionError(
+                    str(exc),
+                    code="vinted_browser_unconfigured",
+                ) from exc
+            except BrowserListingUnavailableError as exc:
+                raise VintedBrowserActionError(
+                    str(exc),
+                    code="vinted_browser_unavailable",
+                ) from exc
+            return self._listing_from_page_text(page_text, url=url, item_id=item_id)
+
         headers = self._request_headers(region=region)
         headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
         headers["Referer"] = f"{self._base_url_for_region(region)}/catalog"
@@ -512,8 +551,12 @@ class VintedClient:
                 status_code=response.status_code,
             )
 
+        return self._listing_from_page_text(response.text, url=url, item_id=item_id)
+
+    @staticmethod
+    def _listing_from_page_text(page_text: str, *, url: str, item_id: str) -> dict[str, Any]:
         parser = _ListingPageMetadataParser()
-        parser.feed(response.text)
+        parser.feed(page_text)
         parser.close()
         title = parser.metadata.get("og:title") or parser.title
         title = re.sub(r"\s*\|\s*Vinted\s*$", "", title, flags=re.IGNORECASE).strip()
@@ -578,14 +621,14 @@ class VintedClient:
 
     @staticmethod
     def _item_id_from_url(url: str) -> str:
-        path = VintedClient._listing_path_from_url(url)
+        path = VintedClient._listing_path_from_url(url, allowed_host="vinted.de")
         match = _ITEM_URL_RE.match(path)
         if match is None:
             raise VintedListingUrlError("Vinted URL must point to a listing under /items/<id>.")
         return match.group("item_id")
 
     @staticmethod
-    def _listing_path_from_url(url: str) -> str:
+    def _listing_path_from_url(url: str, *, allowed_host: str = "vinted.de") -> str:
         value = url.strip()
         # Browsers commonly show or copy URLs without their scheme. Treat a
         # domain/path pasted that way as HTTPS, which is how Vinted serves
@@ -595,7 +638,22 @@ class VintedClient:
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise VintedListingUrlError("Enter a full Vinted listing URL.")
+        host = (parsed.hostname or "").lower().rstrip(".")
+        normalized_allowed_host = allowed_host.lower().rstrip(".")
+        if host != normalized_allowed_host and not host.endswith(f".{normalized_allowed_host}"):
+            raise VintedListingUrlError("Vinted URL must use the vinted.de domain.")
         return parsed.path.rstrip("/")
+
+    def _listing_path_for_client(self, url: str) -> str:
+        allowed_host = urlparse(self.base_url).hostname if self.base_url else "vinted.de"
+        return self._listing_path_from_url(url, allowed_host=allowed_host or "vinted.de")
+
+    def listing_id_from_url(self, url: str) -> str:
+        path = self._listing_path_for_client(url)
+        match = _ITEM_URL_RE.match(path)
+        if match is None:
+            raise VintedListingUrlError("Vinted URL must point to a listing under /items/<id>.")
+        return match.group("item_id")
 
     def _request(
         self,

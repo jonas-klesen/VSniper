@@ -26,6 +26,7 @@ from vsniper.domain.contracts import (
 from vsniper.integrations.openai.client import OpenAITasteClient
 from vsniper.integrations.telegram.client import TelegramClient
 from vsniper.integrations.telegram.service import TelegramFormatter
+from vsniper.integrations.vinted.browser import VintedBrowserClient
 from vsniper.integrations.vinted.client import VintedClient
 from vsniper.services._mapping import build_session_health, integration_configuration
 from vsniper.services.candidate_service import CandidateService
@@ -177,8 +178,10 @@ class AppState:
         )
         self._telegram_http_client = httpx.Client(timeout=10)
 
+        self.vinted_browser_client = VintedBrowserClient(self.settings)
         self.vinted_client = VintedClient(
             client=self._vinted_http_client,
+            browser_client=self.vinted_browser_client,
             on_tokens_refreshed=self._persist_refreshed_tokens,
         )
         self.taste_client = OpenAITasteClient(self.settings, on_usage=self._record_ai_usage)
@@ -320,6 +323,7 @@ class AppState:
         return self.telegram.build_test_message(self.candidates.page(limit=1).items)
 
     def close(self) -> None:
+        self.vinted_browser_client.close()
         self.taste_client.close()
         self._vinted_http_client.close()
         self._telegram_http_client.close()

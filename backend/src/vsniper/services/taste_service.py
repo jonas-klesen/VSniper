@@ -23,6 +23,7 @@ from vsniper.core.database import session_scope
 from vsniper.db.models import AppSettingsState, Candidate, LearningSnapshotState, TasteSampleState, TasteState
 from vsniper.domain.contracts import (
     AiProvider,
+    CandidateFeature,
     CLOTHING_ITEM_LABELS,
     ClothingItem,
     JudgmentPromptPreview,
@@ -202,11 +203,14 @@ class TasteService:
     def add_offer(self, payload: TasteOfferCreate) -> TasteSample:
         if not payload.vinted_url or not payload.vinted_url.strip():
             raise ValueError("Vinted URL is required.")
-        listing = self.vinted_client.fetch_item_by_url(
-            payload.vinted_url,
-            clothing_item=payload.clothing_item,
-            region="de",
-        )
+        item_id = VintedClient._item_id_from_url(payload.vinted_url)
+        listing, candidate_id = self._listing_from_candidate(item_id)
+        if listing is None:
+            listing = self.vinted_client.fetch_item_by_url(
+                payload.vinted_url,
+                clothing_item=payload.clothing_item,
+                region="de",
+            )
         normalized_listing = self._normalise_offer_listing_payload(listing, payload.clothing_item)
         now = datetime.now(UTC)
         with session_scope() as session:
@@ -224,13 +228,64 @@ class TasteService:
                 description=listing.get("description") or "",
                 image_urls=listing.get("image_urls") or [],
                 normalized_listing=normalized_listing,
+                candidate_id=candidate_id,
                 created_at=now,
                 updated_at=now,
             )
-            sample.cached_image_paths = self._cache_image_urls(sample.id, sample.image_urls)
+            sample.cached_image_paths = (
+                self._copy_candidate_cache(sample.id, candidate_id, len(sample.image_urls))
+                if candidate_id
+                else []
+            )
+            if not sample.cached_image_paths:
+                sample.cached_image_paths = self._cache_image_urls(sample.id, sample.image_urls)
             session.add(sample)
             session.flush()
             return taste_sample_to_contract(sample)
+
+    @staticmethod
+    def _listing_from_candidate(external_item_id: str) -> tuple[dict | None, str | None]:
+        with session_scope() as session:
+            candidate = session.scalar(
+                select(Candidate)
+                .where(Candidate.external_item_id == external_item_id)
+                .order_by(Candidate.last_seen_at.desc(), Candidate.created_at.desc())
+                .limit(1)
+            )
+            if candidate is None:
+                return None, None
+            normalized = candidate.normalized_listing or {}
+            listing = {
+                "id": external_item_id,
+                "external_item_id": external_item_id,
+                "title": candidate.title,
+                "brand": candidate.brand,
+                "price_eur": candidate.price_eur,
+                "size": candidate.size,
+                "url": candidate.url,
+                "image_urls": list(candidate.image_urls or []),
+                "description": normalized.get("description", "") or "",
+                "features": [CandidateFeature.model_validate(feature) for feature in candidate.features or []],
+                "raw_listing": normalized.get("raw_listing", normalized),
+            }
+            return listing, candidate.id
+
+    def _copy_candidate_cache(self, sample_id: str, candidate_id: str, image_count: int) -> list[str]:
+        cache_root = self.settings.resolve_path(self.settings.cache_dir)
+        candidate_dir = cache_root / "candidate-images"
+        target_dir = self._offer_cache_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        safe_candidate_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in candidate_id)
+        copied: list[str] = []
+        for index in range(min(image_count, 4)):
+            source_suffix = "" if index == 0 else f"-{index + 1}"
+            source = candidate_dir / f"{safe_candidate_id}{source_suffix}.jpg"
+            if not source.exists() or not source.is_file():
+                continue
+            target = target_dir / f"{sample_id}-{index}.jpg"
+            shutil.copy2(source, target)
+            copied.append(target.relative_to(cache_root).as_posix())
+        return copied
 
     @staticmethod
     def _normalise_offer_listing_payload(raw: dict, clothing_item: ClothingItem) -> dict:

@@ -244,6 +244,10 @@ function AddOfferModal({
   const [error, setError] = useState<unknown>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalDismiss(dialogRef, onClose, submitting);
+  const recoveryPath = error instanceof ApiError
+    && error.code === 'vinted_browser_challenge'
+    ? error.recoveryPath
+    : undefined;
 
   const submit = async () => {
     if (!url.trim() || submitting) return;
@@ -318,6 +322,19 @@ function AddOfferModal({
           </button>
         </div>
         <ErrorText error={error} prefix="Add offer failed" />
+        {recoveryPath && (
+          <div className="button-row" style={{ marginTop: '0.75rem' }}>
+            <button
+              className="secondary"
+              onClick={() => window.open(recoveryPath, '_blank', 'noopener,noreferrer')}
+            >
+              Open Vinted browser
+            </button>
+            <span className="muted" style={{ fontSize: '0.82rem' }}>
+              Complete the verification there, then retry this import.
+            </span>
+          </div>
+        )}
       </div>
     </div>,
     document.body,

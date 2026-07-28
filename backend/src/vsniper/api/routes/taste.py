@@ -21,7 +21,11 @@ from vsniper.domain.contracts import (
     WardrobeZipManifest,
 )
 from vsniper.integrations.openai.client import OpenAIIntegrationError
-from vsniper.integrations.vinted.client import VintedClientError, VintedListingUrlError
+from vsniper.integrations.vinted.client import (
+    VintedBrowserActionError,
+    VintedClientError,
+    VintedListingUrlError,
+)
 from vsniper.services.taste_service import TasteRecomputeAlreadyRunning
 
 router = APIRouter(tags=["taste"])
@@ -120,6 +124,15 @@ def add_offer(payload: TasteOfferCreate) -> TasteSample:
         return get_state().taste.add_offer(payload)
     except VintedListingUrlError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except VintedBrowserActionError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "recovery_path": exc.recovery_path,
+            },
+        ) from exc
     except VintedClientError as exc:
         status_code = 503 if exc.retryable else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc

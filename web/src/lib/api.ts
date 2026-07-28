@@ -87,11 +87,16 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly path: string,
-    detail?: string,
+    detail?: ApiErrorDetail,
   ) {
-    super(ApiError.describe(status, path, detail));
+    super(ApiError.describe(status, path, detail?.message));
     this.name = 'ApiError';
+    this.code = detail?.code;
+    this.recoveryPath = detail?.recoveryPath;
   }
+
+  readonly code?: string;
+  readonly recoveryPath?: string;
 
   private static describe(status: number, path: string, detail?: string): string {
     if (detail) return detail;
@@ -103,11 +108,17 @@ export class ApiError extends Error {
   }
 }
 
+type ApiErrorDetail = {
+  message?: string;
+  code?: string;
+  recoveryPath?: string;
+};
+
 // FastAPI errors come back as { detail: string } or { detail: [{ msg, ... }] }.
-async function extractDetail(response: Response): Promise<string | undefined> {
+async function extractDetail(response: Response): Promise<ApiErrorDetail | undefined> {
   try {
     const data = await response.clone().json();
-    if (typeof data?.detail === 'string') return data.detail;
+    if (typeof data?.detail === 'string') return { message: data.detail };
     if (Array.isArray(data?.detail)) {
       const messages = data.detail
         .map((item: unknown) => {
@@ -116,12 +127,23 @@ async function extractDetail(response: Response): Promise<string | undefined> {
           return '';
         })
         .filter(Boolean);
-      if (messages.length) return messages.join('\n');
+      if (messages.length) return { message: messages.join('\n') };
     }
-    if (data?.detail && typeof data.detail === 'object') return JSON.stringify(data.detail);
+    if (data?.detail && typeof data.detail === 'object') {
+      const detail = data.detail as {
+        message?: unknown;
+        code?: unknown;
+        recovery_path?: unknown;
+      };
+      return {
+        message: typeof detail.message === 'string' ? detail.message : JSON.stringify(data.detail),
+        code: typeof detail.code === 'string' ? detail.code : undefined,
+        recoveryPath: typeof detail.recovery_path === 'string' ? detail.recovery_path : undefined,
+      };
+    }
   } catch {
     const text = await response.clone().text().catch(() => '');
-    if (text.trim()) return text.trim();
+    if (text.trim()) return { message: text.trim() };
   }
   return undefined;
 }

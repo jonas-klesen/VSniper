@@ -67,6 +67,8 @@ npm run dev
 Use [`.env.example`](.env.example) as the configuration reference. The main credentials are:
 
 - `VINTED_COOKIE` for live Vinted searches
+- `VINTED_BROWSER_PROXY_URL` for proxy-backed Add-by-URL imports; use a sticky
+  residential endpoint so browser verification survives between requests
 - `AI_API_KEY` for AI-backed taste learning and supported judging modes
 - `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts and feedback
 - `TELEGRAM_WEBHOOK_URL` and optional `TELEGRAM_WEBHOOK_SECRET` for Telegram callbacks
@@ -83,6 +85,16 @@ Production uses `docker-compose.coolify.yml`. In Coolify:
 4. Set `TELEGRAM_WEBHOOK_URL` to `https://<your-domain>/api/telegram/webhook` and register the webhook.
 
 Coolify handles the public proxy and TLS. The web container serves the built app through nginx, proxies `/api` to the backend, and requires basic authentication for the dashboard and API.
+Before deploying, configure a sticky residential proxy for the persistent
+Vinted browser:
+
+```env
+VINTED_BROWSER_PROXY_URL=http://username:password@proxy-host:port
+```
+
+If Vinted requests browser verification during an Add-by-URL import, use the
+action shown in the modal to open `/vinted-browser/`, solve it in the persistent
+browser, and retry the import.
 
 ## Development checks
 
