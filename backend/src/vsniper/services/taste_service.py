@@ -48,6 +48,7 @@ from vsniper.services._mapping import (
     taste_sample_to_contract,
     taste_state_to_snapshot,
 )
+from vsniper.services.error_service import ErrorService
 
 
 _IMAGE_FORMAT_SUFFIXES = {
@@ -95,10 +96,17 @@ class _SampleImageInput:
 
 
 class TasteService:
-    def __init__(self, settings: Settings, taste_client: OpenAITasteClient, vinted_client: VintedClient) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        taste_client: OpenAITasteClient,
+        vinted_client: VintedClient,
+        errors: ErrorService | None = None,
+    ) -> None:
         self.settings = settings
         self.taste_client = taste_client
         self.vinted_client = vinted_client
+        self.errors = errors
         self._upload_dir_path().mkdir(parents=True, exist_ok=True)
         self._offer_cache_dir().mkdir(parents=True, exist_ok=True)
         self._feedback_asset_dir().mkdir(parents=True, exist_ok=True)
@@ -580,8 +588,16 @@ class TasteService:
                         sample.stored_image_paths = copied
                         sample.updated_at = datetime.now(UTC)
                         migrated += 1
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to migrate legacy feedback images into durable storage")
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="worker",
+                    operation="migrate_feedback_images",
+                    summary="Legacy feedback image migration failed",
+                    exception=exc,
+                )
         return migrated
 
     @staticmethod
@@ -911,6 +927,17 @@ class TasteService:
             result = self._run_recompute_unlocked(job_id)
         except Exception as exc:
             self._finish_recompute(job_id=job_id, status="failed", error=str(exc)[:1000])
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="taste_recompute",
+                    operation="recompute",
+                    summary="Taste recompute failed",
+                    exception=exc,
+                    details={"job_id": job_id},
+                    related_entity_type="taste_recompute",
+                    related_entity_id=job_id,
+                )
             raise
         self._finish_recompute(job_id=job_id, status="succeeded", result=result)
         return result.model_copy(update={"snapshot": self.get_snapshot()})

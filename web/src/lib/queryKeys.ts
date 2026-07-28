@@ -6,6 +6,8 @@ export const queryKeys = {
   costs: ['ai-cost-stats'] as const,
   scoreDistribution: (window: string) => ['score-distribution', window] as const,
   storage: ['storage'] as const,
+  errors: (params: { source: string; offset: number; limit: number }) =>
+    ['errors', params.source, params.offset, params.limit] as const,
   searches: ['searches'] as const,
   searchCategoryOptions: ['search-category-options'] as const,
   taste: ['taste'] as const,

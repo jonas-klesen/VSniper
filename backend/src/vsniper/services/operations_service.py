@@ -235,7 +235,7 @@ def record_heartbeat(
         )
 
 
-def close_orphaned_running_runs(search_id: str) -> None:
+def close_orphaned_running_runs(search_id: str) -> list[int]:
     """Marks any SearchRun row for search_id still status="running" as failed.
 
     Called when claim_for_run successfully (re)claims a search: a SearchRun left "running" at
@@ -244,6 +244,13 @@ def close_orphaned_running_runs(search_id: str) -> None:
     """
     now = datetime.now(UTC)
     with session_scope() as session:
+        run_ids = list(
+            session.scalars(
+                select(SearchRun.id)
+                .where(SearchRun.search_id == search_id)
+                .where(SearchRun.status == "running")
+            )
+        )
         session.execute(
             update(SearchRun)
             .where(SearchRun.search_id == search_id)
@@ -254,6 +261,7 @@ def close_orphaned_running_runs(search_id: str) -> None:
                 error="Orphaned: process was killed or crashed before this run could finish.",
             )
         )
+        return run_ids
 
 
 def create_search_run(

@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     candidate_retention_days: int = Field(default=365, alias="CANDIDATE_RETENTION_DAYS")
     delivery_retention_days: int = Field(default=365, alias="DELIVERY_RETENTION_DAYS")
     ai_usage_retention_days: int = Field(default=365, alias="AI_USAGE_RETENTION_DAYS")
+    error_retention_days: int = Field(default=365, alias="ERROR_RETENTION_DAYS")
     # How often (in worker cycles) to run the prune job; ~hourly at a 60s cycle interval.
     prune_every_cycles: int = Field(default=60, alias="PRUNE_EVERY_CYCLES")
     # Comma-separated list of browser origins allowed to call the API. Defaults to the local

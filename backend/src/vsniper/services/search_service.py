@@ -66,6 +66,7 @@ from vsniper.services._mapping import (
     search_to_record,
     settings_to_contract,
 )
+from vsniper.services.error_service import ErrorService
 from vsniper.services.operations_service import (
     CLAIM_STALE_THRESHOLD,
     close_orphaned_running_runs,
@@ -192,12 +193,14 @@ class SearchService:
         taste_client: OpenAITasteClient,
         preferences: TasteService,
         telegram: TelegramService,
+        errors: ErrorService | None = None,
     ) -> None:
         self.settings = settings
         self.vinted_client = vinted_client
         self.taste_client = taste_client
         self.preferences = preferences
         self.telegram = telegram
+        self.errors = errors
 
     def all(self) -> list[SearchRecord]:
         with session_scope() as session:
@@ -431,8 +434,22 @@ class SearchService:
             )
             claimed = result.rowcount == 1
         if claimed:
-            close_orphaned_running_runs(search_id)
+            self._close_orphaned_runs(search_id)
         return claimed
+
+    def _close_orphaned_runs(self, search_id: str) -> None:
+        for run_id in close_orphaned_running_runs(search_id):
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="search",
+                    operation="recover_orphaned_run",
+                    summary="Search run was orphaned",
+                    message="The worker process stopped before the search run could finish.",
+                    details={"search_id": search_id, "run_id": run_id},
+                    related_entity_type="search_run",
+                    related_entity_id=run_id,
+                )
 
     @staticmethod
     def _search_exists(search_id: str) -> bool:
@@ -1122,6 +1139,24 @@ class SearchService:
             # reclaim and re-scan mid-run. The preview's exception still propagates to its caller.
             if mode == "live":
                 self._mark_run_failed(search_id)
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="search",
+                    operation="run_search",
+                    summary="Search run failed",
+                    exception=exc,
+                    details={
+                        "search_id": search_id,
+                        "run_id": run_id,
+                        "mode": mode,
+                        "vinted_status": vinted_status,
+                        "vinted_detail": vinted_detail,
+                        "fetched_count": len(raw_candidates),
+                    },
+                    related_entity_type="search_run" if run_id is not None else "search",
+                    related_entity_id=run_id if run_id is not None else search_id,
+                )
             raise
 
     def _persist_candidate_batch(
@@ -1208,6 +1243,28 @@ class SearchService:
                 session.execute(
                     stmt.on_conflict_do_update(index_elements=[Candidate.id], set_=update_cols)
                 )
+
+                errors = getattr(self, "errors", None)
+                if grading_stage == "failed" and errors is not None:
+                    errors.record(
+                        source="candidate_judgment",
+                        operation="judge_candidate",
+                        summary="Candidate judgment failed after recovery attempts",
+                        message=score_trace.explanation or score_trace.summary,
+                        details={
+                            "candidate_id": candidate_id,
+                            "search_id": search.id,
+                            "title": raw["title"],
+                            "url": raw["url"],
+                            "model": score_trace.model,
+                            "mode": mode,
+                            "labels": score_trace.labels,
+                            "concerns": score_trace.concerns,
+                        },
+                        related_entity_type="candidate",
+                        related_entity_id=candidate_id,
+                        session=session,
+                    )
 
                 if mode == "live" and score_trace.decision == "alert":
                     # populate_existing forces a refresh from the row just written above, bypassing any
@@ -1328,7 +1385,7 @@ class SearchService:
             else:
                 search.cancel_requested_at = datetime.now(UTC)
         if is_stale:
-            close_orphaned_running_runs(search_id)
+            self._close_orphaned_runs(search_id)
         return True
 
     @staticmethod
@@ -1418,8 +1475,19 @@ class SearchService:
         if cookie_changed or region_changed:
             try:
                 session_health_json = self._fetch_session_health_json(region=payload.vinted_region, force=True)
-            except Exception:
+            except Exception as exc:
                 _logger.warning("Settings saved without refreshed Vinted session health.", exc_info=True)
+                errors = getattr(self, "errors", None)
+                if errors is not None:
+                    errors.record(
+                        source="api",
+                        operation="refresh_vinted_session_health",
+                        summary="Vinted session health refresh failed",
+                        exception=exc,
+                        details={"region": payload.vinted_region},
+                        related_entity_type="app_settings",
+                        related_entity_id=1,
+                    )
 
         # Phase 3 — write txn: apply all field updates and the freshly fetched health.
         with session_scope() as session:

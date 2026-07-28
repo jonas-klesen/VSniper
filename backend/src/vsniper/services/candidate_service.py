@@ -35,6 +35,7 @@ from vsniper.services._mapping import (
     extract_condition,
     resolve_ai_model,
 )
+from vsniper.services.error_service import ErrorService
 from vsniper.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
@@ -61,10 +62,12 @@ class CandidateService:
         settings: Settings,
         preferences: TasteService,
         taste_client: OpenAITasteClient,
+        errors: ErrorService | None = None,
     ) -> None:
         self.settings = settings
         self.preferences = preferences
         self.taste_client = taste_client
+        self.errors = errors
 
     def _candidate_image_cache_path(self, candidate_id: str) -> Path:
         cache_dir = self.settings.resolve_path(self.settings.cache_dir) / "candidate-images"
@@ -146,8 +149,23 @@ class CandidateService:
                 image_detail=obs_settings.image_detail,
                 local_base_url=obs_settings.local_base_url,
             )
-        except OpenAIIntegrationError:
+        except OpenAIIntegrationError as exc:
             logger.warning("Failed to describe candidate %s for learning evidence.", candidate_model.id, exc_info=True)
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="candidate_judgment",
+                    operation="learning_observation",
+                    summary="Candidate learning observation failed",
+                    exception=exc,
+                    details={
+                        "candidate_id": candidate_model.id,
+                        "provider": obs_settings.provider,
+                        "model": obs_settings.model,
+                    },
+                    related_entity_type="candidate",
+                    related_entity_id=candidate_model.id,
+                )
             return None
         return observation.model_dump(mode="json")
 

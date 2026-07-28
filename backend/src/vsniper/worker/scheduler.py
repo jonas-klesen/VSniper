@@ -49,6 +49,19 @@ _active_scan_threads: set[threading.Thread] = set()
 _active_scan_lock = threading.Lock()
 
 
+def _record_worker_error(operation: str, summary: str, exc: BaseException) -> None:
+    try:
+        get_state().errors.record(
+            source="worker",
+            operation=operation,
+            summary=summary,
+            exception=exc,
+            details={"worker_owner": _WORKER_OWNER, "cycle_count": _cycle_count},
+        )
+    except Exception:
+        _logger.exception("could not persist worker error event")
+
+
 def _run_one(search_id: str, search_name: str, interval: int) -> None:
     state = get_state()
     if not state.searches.claim_for_run(
@@ -94,13 +107,23 @@ def cycle(interval: int) -> None:
                     for fut in as_completed(futures, timeout=_CYCLE_TIMEOUT_SECONDS):
                         try:
                             fut.result()
-                        except Exception:
+                        except Exception as exc:
                             _logger.exception("unexpected error from search worker future")
+                            _record_worker_error(
+                                "search_worker_future",
+                                "Unexpected search worker future failure",
+                                exc,
+                            )
                 except FutureTimeoutError:
                     timed_out = True
                     _logger.warning(
                         "worker cycle timeout after %ds — cancelling unfinished futures",
                         _CYCLE_TIMEOUT_SECONDS,
+                    )
+                    _record_worker_error(
+                        "search_cycle_timeout",
+                        "Worker search cycle timed out",
+                        RuntimeError(f"Search cycle exceeded {_CYCLE_TIMEOUT_SECONDS} seconds."),
                     )
                     for fut, (search_id, search_name) in futures.items():
                         if not fut.done():
@@ -123,9 +146,26 @@ def _run_maintenance() -> None:
             dispose_engine()
             _logger.info("delivery processing skipped: maintenance is active")
             return
-        delivery_result = process_deliveries_once()
-        if delivery_result.eligible_deliveries or delivery_result.skipped_reason:
-            _logger.info("%s", delivery_result.summary)
+        try:
+            delivery_result = process_deliveries_once()
+            if delivery_result.eligible_deliveries or delivery_result.skipped_reason:
+                _logger.info("%s", delivery_result.summary)
+        except Exception as exc:
+            _logger.exception("Telegram delivery processing failed")
+            _record_worker_error(
+                "process_deliveries",
+                "Telegram delivery processing failed",
+                exc,
+            )
+
+    # Error notifications are a separate durable outbox. Failures here are only logged and
+    # stored on their originating event, never recorded as new error events.
+    try:
+        notification_result = get_state().errors.process_pending_notifications()
+        if notification_result["claimed"]:
+            _logger.info("Processed error notifications: %s", notification_result)
+    except Exception:
+        _logger.warning("error notification processing failed", exc_info=True)
 
     record_heartbeat(owner=_WORKER_OWNER, cycle_count=_cycle_count, phase="check_cookie_expiry")
 
@@ -136,8 +176,9 @@ def _run_maintenance() -> None:
             return
         try:
             check_cookie_expiry()
-        except Exception:
+        except Exception as exc:
             _logger.warning("cookie expiry check failed", exc_info=True)
+            _record_worker_error("check_cookie_expiry", "Cookie expiry check failed", exc)
 
     state = get_state()
     prune_every = max(1, state.settings.prune_every_cycles)
@@ -150,8 +191,16 @@ def _run_maintenance() -> None:
                 return
             try:
                 prune_records_once()
-            except Exception:
+            except Exception as exc:
                 _logger.warning("record pruning failed", exc_info=True)
+                _record_worker_error("prune_records", "Record pruning failed", exc)
+            try:
+                pruned_errors = get_state().errors.prune_old_events()
+                if pruned_errors:
+                    _logger.info("Pruned %d old error events", pruned_errors)
+            except Exception as exc:
+                _logger.warning("error-event pruning failed", exc_info=True)
+                _record_worker_error("prune_error_events", "Error-event pruning failed", exc)
 
     cycle_finished = datetime.now(UTC)
     record_heartbeat(
@@ -209,8 +258,9 @@ def _resolve_interval(override: int | None) -> int:
         return override
     try:
         return get_state().searches.get_scan_interval_seconds()
-    except Exception:
+    except Exception as exc:
         _logger.warning("could not read configured scan interval; falling back to default", exc_info=True)
+        _record_worker_error("resolve_scan_interval", "Could not read configured scan interval", exc)
         return get_settings().scan_interval_seconds
 
 
@@ -230,14 +280,16 @@ def _run_continuous_loop(interval_override: int | None) -> None:
         if last_maintenance_at is None or now - last_maintenance_at >= _MAINTENANCE_TICK_SECONDS:
             try:
                 _run_maintenance()
-            except Exception:
+            except Exception as exc:
                 _logger.exception("maintenance pass failed; continuing")
+                _record_worker_error("maintenance_pass", "Worker maintenance pass failed", exc)
             last_maintenance_at = time.monotonic()
 
         try:
             enabled = _enabled_searches()
-        except Exception:
+        except Exception as exc:
             _logger.exception("could not list enabled searches")
+            _record_worker_error("list_enabled_searches", "Worker could not list enabled searches", exc)
             enabled = []
 
         if not enabled:

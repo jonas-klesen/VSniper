@@ -35,6 +35,7 @@ from vsniper.services._mapping import (
     timestamp_to_datetime,
 )
 from vsniper.services.candidate_service import CandidateService
+from vsniper.services.error_service import ErrorService
 from vsniper.services.taste_service import TasteService
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class TelegramService:
         candidates: CandidateService,
         vinted_client: VintedClient,
         taste: TasteService,
+        errors: ErrorService | None = None,
     ) -> None:
         self.settings = settings
         self.telegram_client = telegram_client
@@ -106,6 +108,7 @@ class TelegramService:
         self.candidates = candidates
         self.vinted_client = vinted_client
         self.taste = taste
+        self.errors = errors
         self._apply_search_drafts: Callable[[int | None], SearchDraftApplyResult] | None = None
 
     def set_search_draft_applier(self, applier: Callable[[int | None], SearchDraftApplyResult]) -> None:
@@ -395,13 +398,25 @@ class TelegramService:
                 return "failed"
             candidate = session.get(Candidate, delivery.candidate_id)
             if candidate is None:
-                self._record_failure(
+                outcome = self._record_failure(
                     delivery,
                     attempted_at=datetime.now(UTC),
                     error_message="Candidate no longer exists for this alert delivery.",
                     retryable=False,
                 )
-                return "failed"
+                errors = getattr(self, "errors", None)
+                if errors is not None:
+                    errors.record(
+                        source="telegram",
+                        operation="deliver_candidate_alert",
+                        summary="Telegram candidate alert failed",
+                        message="Candidate no longer exists for this alert delivery.",
+                        details={"delivery_id": delivery_id, "candidate_id": delivery.candidate_id},
+                        related_entity_type="alert_delivery",
+                        related_entity_id=delivery_id,
+                        session=session,
+                    )
+                return outcome
             payload_preview = self.telegram_formatter.build_alert_message(candidate_to_contract(candidate))
 
         attempted_at = datetime.now(UTC)
@@ -417,12 +432,30 @@ class TelegramService:
                 if delivery is None:
                     return "failed"
                 delivery.payload_preview = payload_preview
-                return self._record_failure(
+                outcome = self._record_failure(
                     delivery,
                     attempted_at=attempted_at,
                     error_message=str(exc),
                     retryable=getattr(exc, "retryable", False),
                 )
+                errors = getattr(self, "errors", None)
+                if outcome == "failed" and errors is not None:
+                    errors.record(
+                        source="telegram",
+                        operation="deliver_candidate_alert",
+                        summary="Telegram candidate alert exhausted its retries",
+                        exception=exc,
+                        details={
+                            "delivery_id": delivery_id,
+                            "candidate_id": delivery.candidate_id,
+                            "attempt_count": delivery.attempt_count,
+                            "payload_preview": payload_preview,
+                        },
+                        related_entity_type="alert_delivery",
+                        related_entity_id=delivery_id,
+                        session=session,
+                    )
+                return outcome
 
         with session_scope() as session:
             delivery = session.get(AlertDeliveryState, delivery_id)
@@ -540,8 +573,19 @@ class TelegramService:
         # Phase 2 — send the warning with no DB lock held.
         try:
             self.telegram_client.send_message(chat_id=config.chat_id, text=text)
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to send refresh token expiry warning to Telegram", exc_info=True)
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="telegram",
+                    operation="send_refresh_token_expiry_warning",
+                    summary="Telegram refresh-token warning failed",
+                    exception=exc,
+                    details={"refresh_token_expiry": refresh_token_expiry},
+                    related_entity_type="app_settings",
+                    related_entity_id=1,
+                )
             return
 
         # Phase 3 — write txn: record the send (idempotent against a concurrent send for the same key).
@@ -558,8 +602,17 @@ class TelegramService:
             return
         try:
             self.telegram_client.answer_callback_query(callback_query_id=callback_query_id, text=text)
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to ACK Telegram callback %s", callback_query_id, exc_info=True)
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="telegram",
+                    operation="acknowledge_callback",
+                    summary="Telegram callback acknowledgement failed",
+                    exception=exc,
+                    details={"callback_query_id": callback_query_id},
+                )
 
     def _update_feedback_message(self, callback_query: TelegramCallbackQuery, result: TelegramWebhookResult) -> None:
         if result.action not in {"feedback_recorded", "feedback_unchanged"} or result.verdict is None:
@@ -583,13 +636,24 @@ class TelegramService:
                 text=updated_text,
                 reply_markup={"inline_keyboard": []},
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "Failed to edit Telegram message %s in chat %s",
                 message.message_id,
                 message.chat.id,
                 exc_info=True,
             )
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="telegram",
+                    operation="edit_feedback_message",
+                    summary="Telegram feedback message update failed",
+                    exception=exc,
+                    details={"message_id": message.message_id, "chat_id": str(message.chat.id)},
+                    related_entity_type="telegram_message",
+                    related_entity_id=message.message_id,
+                )
 
     @staticmethod
     def _callback_ack_text(result: TelegramWebhookResult) -> str:
@@ -630,8 +694,17 @@ class TelegramService:
     ) -> None:
         try:
             self.telegram_client.send_message(chat_id=str(chat_id), text=text, reply_markup=reply_markup)
-        except Exception:
+        except Exception as exc:
             logger.warning("Failed to send Telegram message to chat %s", chat_id, exc_info=True)
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="telegram",
+                    operation="send_message",
+                    summary="Telegram message failed",
+                    exception=exc,
+                    details={"chat_id": str(chat_id), "message_preview": text[:500]},
+                )
 
     def _edit_or_send_callback_message(
         self,

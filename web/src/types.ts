@@ -380,6 +380,51 @@ export type SettingsSnapshot = {
   };
 };
 
+export type ErrorSource =
+  | 'api'
+  | 'search'
+  | 'candidate_judgment'
+  | 'taste_recompute'
+  | 'telegram'
+  | 'worker';
+
+export type ErrorTelegramNotificationStatus =
+  | 'not_requested'
+  | 'pending'
+  | 'processing'
+  | 'sent'
+  | 'failed';
+
+export type ErrorEventRecord = {
+  id: number;
+  occurred_at: string;
+  source: ErrorSource;
+  operation: string;
+  summary: string;
+  message: string;
+  exception_type: string | null;
+  details: Record<string, unknown>;
+  related_entity_type: string | null;
+  related_entity_id: string | null;
+  telegram_notification_status: ErrorTelegramNotificationStatus;
+  telegram_notification_attempt_count: number;
+  telegram_notification_last_attempted_at: string | null;
+  telegram_notification_last_error: string | null;
+  telegram_notification_sent_at: string | null;
+};
+
+export type ErrorEventPage = {
+  items: ErrorEventRecord[];
+  total: number;
+  telegram_notifications_enabled: boolean;
+  telegram_configured: boolean;
+};
+
+export type ErrorNotificationSettings = {
+  enabled: boolean;
+  telegram_configured: boolean;
+};
+
 export type TelegramWebhookStatus = {
   last_check_ok: boolean;
   is_registered: boolean;

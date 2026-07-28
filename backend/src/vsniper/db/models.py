@@ -171,6 +171,7 @@ class AppSettingsState(Base):
     telegram_webhook_url: Mapped[str] = mapped_column(Text, default="", nullable=False)
     telegram_webhook_secret: Mapped[str] = mapped_column(Text, default="", nullable=False)
     telegram_configured: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    error_telegram_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     judge_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     judge_fallback_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     learn_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -188,6 +189,35 @@ class AppSettingsState(Base):
     # Brand titles (as returned by Vinted's own brand catalog) that are hard-excluded from every
     # scan before judging — matched case-insensitively against the candidate's extracted brand.
     blocked_brands: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+
+
+class ErrorEvent(Base):
+    __tablename__ = "error_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    operation: Mapped[str] = mapped_column(String(128), nullable=False)
+    summary: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    exception_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    related_entity_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    related_entity_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    telegram_notification_status: Mapped[str] = mapped_column(
+        String(32), default="not_requested", nullable=False, index=True
+    )
+    telegram_notification_attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    telegram_notification_last_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    telegram_notification_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_notification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 class AiModelConfig(Base):

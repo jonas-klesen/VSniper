@@ -437,6 +437,44 @@ class SettingsSnapshot(BaseModel):
     session_health: SessionHealth
 
 
+ErrorSource = Literal["api", "search", "candidate_judgment", "taste_recompute", "telegram", "worker"]
+ErrorTelegramNotificationStatus = Literal["not_requested", "pending", "processing", "sent", "failed"]
+
+
+class ErrorEventRecord(BaseModel):
+    id: int
+    occurred_at: datetime
+    source: ErrorSource
+    operation: str
+    summary: str
+    message: str
+    exception_type: str | None = None
+    details: dict = Field(default_factory=dict)
+    related_entity_type: str | None = None
+    related_entity_id: str | None = None
+    telegram_notification_status: ErrorTelegramNotificationStatus = "not_requested"
+    telegram_notification_attempt_count: int = 0
+    telegram_notification_last_attempted_at: datetime | None = None
+    telegram_notification_last_error: str | None = None
+    telegram_notification_sent_at: datetime | None = None
+
+
+class ErrorEventPage(BaseModel):
+    items: list[ErrorEventRecord] = Field(default_factory=list)
+    total: int = 0
+    telegram_notifications_enabled: bool = False
+    telegram_configured: bool = False
+
+
+class ErrorNotificationSettingsUpdate(BaseModel):
+    enabled: bool
+
+
+class ErrorNotificationSettings(BaseModel):
+    enabled: bool
+    telegram_configured: bool
+
+
 class DashboardStats(BaseModel):
     active_searches: int
     candidates_today: int

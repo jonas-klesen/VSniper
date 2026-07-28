@@ -30,6 +30,7 @@ from vsniper.integrations.vinted.browser import VintedBrowserClient
 from vsniper.integrations.vinted.client import VintedClient
 from vsniper.services._mapping import build_session_health, integration_configuration
 from vsniper.services.candidate_service import CandidateService
+from vsniper.services.error_service import ErrorService
 from vsniper.services.search_defaults import CANONICAL_CLOTHING_ITEMS, canonical_search_values
 from vsniper.services.search_service import SearchService
 from vsniper.services.telegram_service import TelegramService
@@ -201,14 +202,21 @@ class AppState:
                 self.vinted_client.set_refresh_token(row.vinted_refresh_token or "")
         logger.info("AppState persisted settings loaded")
 
-        self.taste = TasteService(self.settings, self.taste_client, self.vinted_client)
+        self.errors = ErrorService(self.settings, self.telegram_client)
+        self.taste = TasteService(self.settings, self.taste_client, self.vinted_client, self.errors)
         self.preferences = self.taste
-        self.candidates = CandidateService(self.settings, self.taste, self.taste_client)
+        self.candidates = CandidateService(self.settings, self.taste, self.taste_client, self.errors)
         self.telegram = TelegramService(
-            self.settings, self.telegram_client, self.telegram_formatter, self.candidates, self.vinted_client, self.taste
+            self.settings,
+            self.telegram_client,
+            self.telegram_formatter,
+            self.candidates,
+            self.vinted_client,
+            self.taste,
+            self.errors,
         )
         self.searches = SearchService(
-            self.settings, self.vinted_client, self.taste_client, self.taste, self.telegram
+            self.settings, self.vinted_client, self.taste_client, self.taste, self.telegram, self.errors
         )
         self.telegram.set_search_draft_applier(self.searches.apply_generated_search_drafts)
         logger.info("AppState services initialized in %.1fs", perf_counter() - started)
@@ -270,6 +278,7 @@ class AppState:
                     telegram_webhook_url=settings.telegram_webhook_url or "",
                     telegram_webhook_secret=settings.telegram_webhook_secret or "",
                     telegram_configured=settings.telegram_configured,
+                    error_telegram_notifications_enabled=False,
                     judge_model_id=judge_model_id,
                     judge_fallback_model_id=judge_fallback_model_id,
                     learn_model_id=learn_model_id,

@@ -9,6 +9,9 @@ import type {
   CandidateRecord,
   ClothingItem,
   DashboardStats,
+  ErrorEventPage,
+  ErrorNotificationSettings,
+  ErrorSource,
   JudgmentPromptPreview,
   OperationsSnapshot,
   ScoreDistribution,
@@ -206,6 +209,18 @@ export const api = {
     request<ScoreDistribution>(`/api/stats/score-distribution?window=${window}`),
   getStorageStats: () => request<StorageStats>('/api/storage/stats'),
   clearCandidateImageCache: () => request<CacheClearResult>('/api/storage/cache/clear', { method: 'POST' }),
+  getErrors: (params: { source?: ErrorSource; limit: number; offset: number }) => {
+    const search = new URLSearchParams();
+    if (params.source) search.set('source', params.source);
+    search.set('limit', String(params.limit));
+    search.set('offset', String(params.offset));
+    return request<ErrorEventPage>(`/api/errors?${search.toString()}`);
+  },
+  updateErrorTelegramNotifications: (enabled: boolean) =>
+    request<ErrorNotificationSettings>('/api/errors/telegram-notifications', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
   getSearches: () => request<SearchRecord[]>('/api/searches'),
   getSearchCategoryOptions: () => request<SearchCategoryOptions>('/api/searches/category-options'),
   updateSearch: (searchId: string, payload: SearchUpdatePayload) =>

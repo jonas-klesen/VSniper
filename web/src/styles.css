@@ -219,6 +219,86 @@ code {
   text-transform: uppercase;
 }
 
+.error-notification-setting,
+.error-event__header,
+.error-toolbar,
+.error-event__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.error-notification-setting h3,
+.error-event h3 {
+  margin: 0;
+}
+
+.error-notification-setting p {
+  margin: 0.35rem 0 0;
+}
+
+.error-notification-setting .checkbox-label {
+  flex: 0 0 auto;
+}
+
+.error-toolbar {
+  margin: 1.25rem 0 1rem;
+}
+
+.error-toolbar label {
+  width: min(20rem, 100%);
+}
+
+.error-event-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.error-event__header {
+  align-items: flex-start;
+}
+
+.error-event__header h3 {
+  margin-top: 0.65rem;
+}
+
+.error-event__header time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.error-event__message {
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.error-event__meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.error-event__details {
+  max-height: 32rem;
+  margin: 0.75rem 0 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  background: #0f1513;
+  padding: 0.85rem;
+  color: #dce8e3;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pagination-row {
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
 .nav-list {
   display: flex;
   flex-direction: column;
@@ -1446,9 +1526,16 @@ button.image-tile {
   .page-header,
   .row-between,
   .button-row,
-  .form-actions {
+  .form-actions,
+  .error-notification-setting,
+  .error-event__header,
+  .error-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .error-event__header time {
+    white-space: normal;
   }
 
   .button-row button,
