@@ -125,6 +125,10 @@ services:
     # Traefik active healthcheck here: provider reloads can strand its only
     # server as unavailable. Docker checks web, api, and browser independently.
     labels:
+      # web joins both the Coolify ingress network and the private app network.
+      # Pin Traefik to the ingress network instead of relying on nondeterministic
+      # network selection, which can route it to an unreachable private IP.
+      - "traefik.docker.network=ny7hl8gp7n9f3excayygzj0l"
       - "traefik.http.services.vsniper-web.loadbalancer.server.port=80"
       - "traefik.http.routers.http-0-ny7hl8gp7n9f3excayygzj0l-web.service=vsniper-web"
       - "traefik.http.routers.https-0-ny7hl8gp7n9f3excayygzj0l-web.service=vsniper-web"
