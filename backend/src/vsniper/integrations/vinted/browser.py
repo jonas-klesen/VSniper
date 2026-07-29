@@ -46,10 +46,6 @@ class VintedBrowserClient:
         self._driver: webdriver.Remote | None = None
         self._lock = threading.Lock()
 
-    @property
-    def configured(self) -> bool:
-        return bool(self.settings.vinted_browser_proxy_url.strip())
-
     def close(self) -> None:
         with self._lock:
             driver, self._driver = self._driver, None
@@ -60,12 +56,6 @@ class VintedBrowserClient:
                     _logger.debug("Vinted browser session was already closed.", exc_info=True)
 
     def fetch_html(self, url: str, *, cookie_header: str) -> str:
-        if not self.configured:
-            raise BrowserListingUnconfiguredError(
-                "The Vinted listing browser is not configured. Set VINTED_BROWSER_PROXY_URL "
-                "to a sticky residential proxy."
-            )
-
         with self._lock:
             for attempt in range(2):
                 try:
@@ -87,7 +77,7 @@ class VintedBrowserClient:
                         continue
                     raise BrowserListingUnavailableError(
                         "The Vinted listing browser is unavailable. Check the browser service "
-                        "and residential proxy, then retry."
+                        "and, if configured, the proxy, then retry."
                     ) from exc
 
         raise BrowserListingUnavailableError("The Vinted listing browser is unavailable.")
@@ -112,14 +102,19 @@ class VintedBrowserClient:
             driver.set_page_load_timeout(self.settings.vinted_browser_timeout_seconds)
         except WebDriverException as exc:
             raise BrowserListingUnavailableError(
-                "The Vinted listing browser could not start. Check its service and proxy configuration."
+                "The Vinted listing browser could not start. Check its service and, if configured, "
+                "the proxy."
             ) from exc
 
         self._driver = driver
         return driver
 
     def _configure_proxy(self, options: Options) -> None:
-        parsed = urlparse(self.settings.vinted_browser_proxy_url.strip())
+        proxy_url = self.settings.vinted_browser_proxy_url.strip()
+        if not proxy_url:
+            return
+
+        parsed = urlparse(proxy_url)
         if parsed.scheme not in {"http", "https", "socks5"} or not parsed.hostname or parsed.port is None:
             raise BrowserListingUnconfiguredError(
                 "VINTED_BROWSER_PROXY_URL must be an http, https, or socks5 URL including a port."

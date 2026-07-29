@@ -39,11 +39,32 @@ class _FakeDriver:
         self.visited.append(url)
 
 
-def test_browser_fetch_requires_proxy_configuration() -> None:
+def test_browser_fetch_attempts_listing_without_proxy(monkeypatch) -> None:
+    html = '<meta property="og:title" content="Wide cargos | Vinted">'
+    driver = _FakeDriver(title="Wide cargos | Vinted", html=html)
     client = VintedBrowserClient(_settings(proxy_url=""))
+    monkeypatch.setattr(client, "_driver_or_create", lambda: driver)
 
-    with pytest.raises(BrowserListingUnconfiguredError, match="VINTED_BROWSER_PROXY_URL"):
-        client.fetch_html("https://www.vinted.de/items/123-item", cookie_header="")
+    result = client.fetch_html("https://www.vinted.de/items/123-item", cookie_header="")
+
+    assert result == html
+    assert driver.visited == ["https://www.vinted.de/items/123-item"]
+
+
+def test_empty_proxy_configuration_adds_no_chromium_proxy_argument() -> None:
+    client = VintedBrowserClient(_settings(proxy_url=""))
+    options = Options()
+
+    client._configure_proxy(options)
+
+    assert all(not argument.startswith("--proxy-server=") for argument in options.arguments)
+
+
+def test_invalid_non_empty_proxy_configuration_is_rejected() -> None:
+    client = VintedBrowserClient(_settings(proxy_url="proxy.example"))
+
+    with pytest.raises(BrowserListingUnconfiguredError, match="http, https, or socks5"):
+        client._configure_proxy(Options())
 
 
 def test_browser_fetch_syncs_cookie_and_returns_listing_html(monkeypatch) -> None:
