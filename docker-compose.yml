@@ -92,7 +92,9 @@ services:
       browser-profile-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4444/status | grep -q '\"ready\": true'"]
+      # Selenium reports ready=false while its only slot has the persistent
+      # Vinted session. The node is healthy as long as it remains available.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4444/status | grep -q '\"availability\": \"UP\"'"]
       interval: 10s
       timeout: 5s
       retries: 12

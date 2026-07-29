@@ -114,11 +114,28 @@ class _ListingPageMetadataParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.metadata: dict[str, str] = {}
         self.canonical_url: str | None = None
+        self.brand: str | None = None
+        self.size: str | None = None
+        self.price: str | None = None
+        self._photo_urls: dict[int, str] = {}
         self._in_title = False
         self._title_parts: list[str] = []
+        self._brand_depth: int | None = None
+        self._brand_parts: list[str] = []
+        self._size_depth: int | None = None
+        self._size_parts: list[str] = []
+        self._price_depth: int | None = None
+        self._price_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = {name.lower(): value for name, value in attrs if value is not None}
+        if self._brand_depth is not None:
+            self._brand_depth += 1
+        if self._size_depth is not None:
+            self._size_depth += 1
+        if self._price_depth is not None:
+            self._price_depth += 1
+
         if tag == "meta":
             key = attributes.get("property") or attributes.get("name")
             content = attributes.get("content")
@@ -129,17 +146,74 @@ class _ListingPageMetadataParser(HTMLParser):
         elif tag == "title":
             self._in_title = True
 
+        href = attributes.get("href", "")
+        if tag == "a" and self.brand is None and urlparse(href).path.startswith("/brand/"):
+            self._brand_depth = 1
+            self._brand_parts = []
+        if self.size is None and attributes.get("itemprop", "").lower() == "size":
+            self._size_depth = 1
+            self._size_parts = []
+        if self.price is None and attributes.get("data-testid") == "item-price":
+            self._price_depth = 1
+            self._price_parts = []
+
+        photo_match = re.fullmatch(r"item-photo-(\d+)--img", attributes.get("data-testid", ""))
+        photo_url = attributes.get("src")
+        if tag == "img" and photo_match and photo_url:
+            self._photo_urls.setdefault(int(photo_match.group(1)), photo_url)
+
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
             self._in_title = False
+        self._brand_depth = self._finish_capture(
+            self._brand_depth,
+            self._brand_parts,
+            lambda value: setattr(self, "brand", value),
+        )
+        self._size_depth = self._finish_capture(
+            self._size_depth,
+            self._size_parts,
+            lambda value: setattr(self, "size", value),
+        )
+        self._price_depth = self._finish_capture(
+            self._price_depth,
+            self._price_parts,
+            lambda value: setattr(self, "price", value),
+        )
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self._title_parts.append(data)
+        if self._brand_depth is not None:
+            self._brand_parts.append(data)
+        if self._size_depth is not None and not any(part.strip() for part in self._size_parts):
+            self._size_parts.append(data)
+        if self._price_depth is not None:
+            self._price_parts.append(data)
+
+    @staticmethod
+    def _finish_capture(
+        depth: int | None,
+        parts: list[str],
+        assign: Callable[[str], None],
+    ) -> int | None:
+        if depth is None:
+            return None
+        depth -= 1
+        if depth > 0:
+            return depth
+        value = " ".join(part.strip() for part in parts if part.strip()).strip()
+        if value:
+            assign(value)
+        return None
 
     @property
     def title(self) -> str:
         return "".join(self._title_parts).strip()
+
+    @property
+    def image_urls(self) -> list[str]:
+        return [url for _, url in sorted(self._photo_urls.items())]
 
 
 class VintedClientError(RuntimeError):
@@ -563,14 +637,19 @@ class VintedClient:
         if not title:
             raise VintedListingUrlError("Vinted could not find a listing at that URL.")
 
-        canonical_url = parser.canonical_url or url
-        image_url = parser.metadata.get("og:image")
+        canonical_url = parser.canonical_url or parser.metadata.get("og:url") or url
+        image_urls = parser.image_urls
+        if not image_urls and (image_url := parser.metadata.get("og:image")):
+            image_urls = [image_url]
         return {
             "id": item_id,
             "title": title,
+            "brand_title": parser.brand,
+            "size_title": parser.size,
+            "price": parser.price,
             "description": parser.metadata.get("og:description") or parser.metadata.get("description") or "",
             "url": canonical_url,
-            "photos": [{"url": image_url}] if image_url else [],
+            "photos": [{"url": image_url} for image_url in image_urls],
             "source": "listing_page_metadata",
         }
 

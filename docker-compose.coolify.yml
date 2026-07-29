@@ -77,7 +77,9 @@ services:
       browser-profile-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4444/status | grep -q '\"ready\": true'"]
+      # Selenium reports ready=false while its only slot has the persistent
+      # Vinted session. The node is healthy as long as it remains available.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4444/status | grep -q '\"availability\": \"UP\"'"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -116,18 +118,14 @@ services:
       - "80"
     networks:
       - app
-    # Active Traefik healthcheck: probe /healthz over the real docker network so
-    # a stale backend endpoint is evicted instead of hanging until a 504 (the
-    # container-level healthcheck below only tests loopback and can't catch
-    # that). Coolify's generated routers are named after the resource UUID, so
-    # the two `.service=` overrides are pinned to THIS Coolify resource
+    # Coolify's generated routers are named after the resource UUID, so the two
+    # `.service=` overrides are pinned to THIS Coolify resource
     # (ny7hl8gp7n9f3excayygzj0l). On a fresh Coolify resource these labels are
-    # inert until the UUID is updated to the new resource's.
+    # inert until the UUID is updated to the new resource's. Do not configure a
+    # Traefik active healthcheck here: provider reloads can strand its only
+    # server as unavailable. Docker checks web, api, and browser independently.
     labels:
       - "traefik.http.services.vsniper-web.loadbalancer.server.port=80"
-      - "traefik.http.services.vsniper-web.loadbalancer.healthcheck.path=/healthz"
-      - "traefik.http.services.vsniper-web.loadbalancer.healthcheck.interval=10s"
-      - "traefik.http.services.vsniper-web.loadbalancer.healthcheck.timeout=3s"
       - "traefik.http.routers.http-0-ny7hl8gp7n9f3excayygzj0l-web.service=vsniper-web"
       - "traefik.http.routers.https-0-ny7hl8gp7n9f3excayygzj0l-web.service=vsniper-web"
     depends_on:

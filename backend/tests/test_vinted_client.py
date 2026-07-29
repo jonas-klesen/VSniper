@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -332,6 +333,40 @@ def test_fetch_item_by_url_retries_anonymously_after_stale_cookie_redirect(monke
     assert listing['title'] == 'Wide black cargos'
     assert cookies[0] is not None
     assert cookies[1] is None
+
+
+def test_fetch_item_by_url_parses_complete_de_listing_fixture(monkeypatch) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    fixture = Path(__file__).parent / 'fixtures' / 'vinted' / 'de' / 'item_9491586544.html'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == '/items/9491586544-hose-mit-muster'
+        return httpx.Response(200, text=fixture.read_text())
+
+    client = VintedClient(
+        base_url='https://www.vinted.de',
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    listing = client.fetch_item_by_url(
+        'https://www.vinted.de/items/9491586544-hose-mit-muster',
+        clothing_item='hosen',
+    )
+
+    assert listing['external_item_id'] == '9491586544'
+    assert listing['title'] == 'Hose mit Muster'
+    assert listing['brand'] == 'Cider'
+    assert listing['size'] == 'L'
+    assert listing['price_eur'] == 12.0
+    assert listing['url'] == 'https://www.vinted.de/items/9491586544-hose-mit-muster'
+    assert listing['image_urls'] == [
+        'https://images1.vinted.net/t/02_0116a/f800/1785048655.webp',
+        'https://images1.vinted.net/t/01_0236b/f800/1785048655.webp',
+        'https://images1.vinted.net/t/05_00473/f800/1785048655.webp',
+        'https://images1.vinted.net/t/05_00394/f800/1785048655.webp',
+    ]
 
 
 def test_fetch_item_by_url_uses_browser_transport_when_configured(monkeypatch) -> None:
