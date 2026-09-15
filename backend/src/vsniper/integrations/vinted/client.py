@@ -529,10 +529,10 @@ class VintedClient:
             if health.status != "healthy":
                 raise VintedSessionError(health.detail, retryable=False)
 
-        payload = self._request(
-            "GET",
+        payload = self._request_catalog(
             region=search.region,
-            path="/api/v2/catalog/items",
+            legacy_path="/api/v2/catalog/items",
+            gateway_path="/web/gateway/svc-catalogue/items",
             params=self._build_search_params(search),
         )
         items = self._extract_items(payload)
@@ -1020,9 +1020,10 @@ class VintedClient:
         cached = self._filter_option_cache.get(cache_key)
         if cached is not None and cached[0] >= now - FILTER_OPTION_CACHE_TTL:
             return cached[1]
-        payload = self._request_filter_options(
+        payload = self._request_catalog(
             region=search.region,
-            operation="search",
+            legacy_path="/api/v2/catalog/filters/search",
+            gateway_path="/web/gateway/svc-filters/filters/search",
             params=params,
         )
         options = payload.get("options")
@@ -1055,9 +1056,10 @@ class VintedClient:
         if cached is not None and cached[0] >= now - FILTER_OPTION_CACHE_TTL:
             return cached[1]
 
-        payload = self._request_filter_options(
+        payload = self._request_catalog(
             region=search.region,
-            operation="facets",
+            legacy_path="/api/v2/catalog/filters/facets",
+            gateway_path="/web/gateway/svc-filters/filters/facets",
             params=params,
         )
         options = payload.get("options")
@@ -1065,25 +1067,24 @@ class VintedClient:
         self._filter_option_cache[cache_key] = (now, result)
         return result
 
-    def _request_filter_options(
-        self, *, region: str, operation: str, params: dict[str, Any],
+    def _request_catalog(
+        self, *, region: str, legacy_path: str, gateway_path: str, params: dict[str, Any],
     ) -> dict[str, Any]:
         try:
             return self._request(
-                "GET", region=region, path=f"/api/v2/catalog/filters/{operation}", params=params,
+                "GET", region=region, path=legacy_path, params=params,
             )
         except VintedSearchError as exc:
             if exc.status_code != 404:
                 raise
 
-        # Vinted is moving filter lookups to its gateway. Its category scope is
-        # a nested attribute, unlike the legacy catalog_ids query parameter.
+        # The gateway uses nested attributes for both catalog and filter IDs.
         gateway_params = dict(params)
-        catalog_ids = gateway_params.pop("catalog_ids", None)
-        if catalog_ids:
-            gateway_params["attribute_ids[catalog]"] = catalog_ids
+        for key in set(FILTER_ID_PARAM_BY_FIELD.values()):
+            if key in gateway_params:
+                gateway_params[f"attribute_ids[{key.removesuffix('_ids')}]"] = gateway_params.pop(key)
         return self._request(
-            "GET", region=region, path=f"/web/gateway/svc-filters/filters/{operation}", params=gateway_params,
+            "GET", region=region, path=gateway_path, params=gateway_params,
         )
 
     @staticmethod
@@ -1125,7 +1126,12 @@ class VintedClient:
         brand = self._extract_brand(item)
         description = self._extract_description(item)
         price_eur = self._extract_price(item)
-        size = self._first_non_empty(item.get("size_title"), item.get("size"), self._nested_value(item, "size", "title")) or "unknown"
+        size = self._first_non_empty(item.get("size_title"), item.get("size"), self._nested_value(item, "size", "title"))
+        if not size:
+            # Gateway listings display size and condition together, e.g. "L · Gut".
+            second_line = self._first_non_empty(self._nested_value(item, "item_box", "second_line")) or ""
+            size_part, separator, _ = second_line.partition(" · ")
+            size = size_part if separator else "unknown"
         url = self._extract_url(item, region=search.region, external_item_id=str(external_item_id))
         image_urls = self._extract_image_urls(item, region=search.region)
         created_at = self._extract_created_at(item)
@@ -1154,6 +1160,10 @@ class VintedClient:
             VintedClient._nested_value(item, "brand_dto", "title"),
             item.get("brand"),
         )
+        if not brand:
+            first_line = VintedClient._nested_value(item, "item_box", "first_line")
+            if first_line != item.get("title"):
+                brand = VintedClient._first_non_empty(first_line)
         return brand or "Unknown"
 
     @staticmethod

@@ -26,6 +26,51 @@ def _jwt_with_expiry(expiry: datetime) -> str:
     return f'{header}.{payload}.signature'
 
 
+def test_search_uses_gateway_after_404(monkeypatch) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    fixture = json.loads((Path(__file__).parent / 'fixtures/vinted/de/gateway_items.json').read_text())
+    legacy_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v2/catalog/items':
+            legacy_params.update(request.url.params)
+            return httpx.Response(404, text='<html>Not found</html>')
+        assert request.url.path == '/web/gateway/svc-catalogue/items'
+        assert request.headers['platform'] == 'web'
+        assert request.headers['locale'] == 'de-DE'
+        assert request.url.params['attribute_ids[catalog]'] == '34'
+        assert request.url.params['attribute_ids[color]'] == '1'
+        assert request.url.params['attribute_ids[status]'] == '2'
+        assert request.url.params['attribute_ids[material]'] == '46'
+        for key in ('catalog_ids', 'color_ids', 'status_ids', 'material_ids'):
+            assert key not in request.url.params
+        for key in ('search_session_id', 'global_catalog_browse_session_id', 'time', 'price_to', 'search_text'):
+            assert request.url.params[key] == legacy_params[key]
+        return httpx.Response(200, json=fixture)
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        filters=[
+            SearchFilter(field='category', label='Category', values=['hosen'], mode='include'),
+            SearchFilter(field='colour', label='Colour', values=['black'], mode='include'),
+            SearchFilter(field='condition', label='Condition', values=['very good'], mode='include'),
+            SearchFilter(field='material', label='Material', values=['wool'], mode='include'),
+            SearchFilter(field='price', label='Price', values=['30'], mode='range'),
+        ],
+        last_run_at=None, last_found_count=0,
+    )
+    listing, = client.run_search(search, validate_session=False)
+    assert listing['external_item_id'] == '9959847701'
+    assert listing['brand'] == 'One Vintage'
+    assert listing['size'] == 'W23 | DE 38'
+    assert listing['price_eur'] == 20
+    assert listing['image_urls']
+
+
 @pytest.mark.parametrize('field,operation', [('size', 'facets'), ('brand', 'search')])
 def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> None:
     monkeypatch.setattr(
