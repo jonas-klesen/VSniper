@@ -15,6 +15,7 @@ from vsniper.integrations.vinted.client import (
     VintedBrowserActionError,
     VintedClient,
     VintedListingUrlError,
+    VintedSearchError,
     VintedSessionError,
 )
 
@@ -23,6 +24,88 @@ def _jwt_with_expiry(expiry: datetime) -> str:
     header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode()).rstrip(b'=').decode()
     payload = base64.urlsafe_b64encode(json.dumps({"exp": int(expiry.timestamp())}).encode()).rstrip(b'=').decode()
     return f'{header}.{payload}.signature'
+
+
+@pytest.mark.parametrize('field,operation', [('size', 'facets'), ('brand', 'search')])
+def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == f'/api/v2/catalog/filters/{operation}':
+            return httpx.Response(404, json={
+                'code': 104, 'message': 'Artikel kann nicht mehr gefunden werden', 'message_code': 'not_found',
+            })
+        if request.url.path == f'/web/gateway/svc-filters/filters/{operation}':
+            assert request.headers['platform'] == 'web'
+            assert request.headers['locale'] == 'de-DE'
+            assert request.url.params['attribute_ids[catalog]'] == '34'
+            assert 'catalog_ids' not in request.url.params
+            assert request.url.params['search_text'] == 'cargo'
+            assert request.url.params['price_to'] == '30'
+            assert request.url.params['currency'] == 'EUR'
+            if field == 'size':
+                assert request.url.params['filter_code'] == 'size'
+            else:
+                assert request.url.params['filter_search_code'] == 'brand'
+                assert request.url.params['filter_search_text'] == 'M'
+            return httpx.Response(200, json={'options': [{'id': 208, 'title': 'M'}]})
+        assert request.url.path == '/api/v2/catalog/items'
+        assert request.url.params[f'{field}_ids'] == '208'
+        assert request.url.params['catalog_ids'] == '34'
+        return httpx.Response(200, json={'items': []})
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        filters=[
+            SearchFilter(field='price', label='Price', values=['30'], mode='range'),
+            SearchFilter(field=field, label=field, values=['M'], mode='include'),
+            SearchFilter(field='category', label='Category', values=['hosen'], mode='include'),
+        ],
+        last_run_at=None, last_found_count=0,
+    )
+
+    assert client.run_search(search, validate_session=False) == []
+    assert client.run_search(search, validate_session=False) == []
+    assert paths == [
+        f'/api/v2/catalog/filters/{operation}', f'/web/gateway/svc-filters/filters/{operation}',
+        '/api/v2/catalog/items', '/api/v2/catalog/items',
+    ]
+
+
+@pytest.mark.parametrize('gateway', [False, True])
+@pytest.mark.parametrize('status', [401, 403, 429, 500])
+def test_filter_lookup_preserves_errors(monkeypatch, status, gateway) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if gateway and request.url.path == '/api/v2/catalog/filters/facets':
+            return httpx.Response(404, json={'code': 104, 'message_code': 'not_found'})
+        return httpx.Response(status, json={'message': 'failed'})
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        filters=[SearchFilter(field='size', label='Size', values=['M'], mode='include')],
+        last_run_at=None, last_found_count=0,
+    )
+    with pytest.raises((VintedSearchError, VintedSessionError)) as error:
+        client.run_search(search, validate_session=False)
+    assert error.value.status_code == status
+    expected = ['/api/v2/catalog/filters/facets']
+    if gateway:
+        expected.append('/web/gateway/svc-filters/filters/facets')
+    assert paths == expected
 
 
 def test_vinted_client_validates_session_and_normalises_results(monkeypatch) -> None:

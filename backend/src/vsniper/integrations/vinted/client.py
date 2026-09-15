@@ -748,6 +748,8 @@ class VintedClient:
 
         url = f"{self._base_url_for_region(region)}{path}"
         headers = self._request_headers(region=region)
+        if path.startswith("/web/gateway/"):
+            headers.update({"Platform": "web", "Locale": "de-DE"})
         cookie_header = self._cookie_header_value()
         if auth_required:
             cookie_header = self._cookie_header_value_or_raise()
@@ -1018,10 +1020,9 @@ class VintedClient:
         cached = self._filter_option_cache.get(cache_key)
         if cached is not None and cached[0] >= now - FILTER_OPTION_CACHE_TTL:
             return cached[1]
-        payload = self._request(
-            "GET",
+        payload = self._request_filter_options(
             region=search.region,
-            path="/api/v2/catalog/filters/search",
+            operation="search",
             params=params,
         )
         options = payload.get("options")
@@ -1054,16 +1055,36 @@ class VintedClient:
         if cached is not None and cached[0] >= now - FILTER_OPTION_CACHE_TTL:
             return cached[1]
 
-        payload = self._request(
-            "GET",
+        payload = self._request_filter_options(
             region=search.region,
-            path="/api/v2/catalog/filters/facets",
+            operation="facets",
             params=params,
         )
         options = payload.get("options")
         result = [item for item in options if isinstance(item, dict)] if isinstance(options, list) else []
         self._filter_option_cache[cache_key] = (now, result)
         return result
+
+    def _request_filter_options(
+        self, *, region: str, operation: str, params: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            return self._request(
+                "GET", region=region, path=f"/api/v2/catalog/filters/{operation}", params=params,
+            )
+        except VintedSearchError as exc:
+            if exc.status_code != 404:
+                raise
+
+        # Vinted is moving filter lookups to its gateway. Its category scope is
+        # a nested attribute, unlike the legacy catalog_ids query parameter.
+        gateway_params = dict(params)
+        catalog_ids = gateway_params.pop("catalog_ids", None)
+        if catalog_ids:
+            gateway_params["attribute_ids[catalog]"] = catalog_ids
+        return self._request(
+            "GET", region=region, path=f"/web/gateway/svc-filters/filters/{operation}", params=gateway_params,
+        )
 
     @staticmethod
     def _filter_context_params(*, search: SearchRecord, current_params: dict[str, Any]) -> dict[str, Any]:
