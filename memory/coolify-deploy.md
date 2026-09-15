@@ -5,6 +5,16 @@ metadata:
   type: project
 ---
 
+## Production access
+
+- Coolify: https://coolify.jonas-klesen.de/
+- Application: https://vsniper.jonas-server.de/
+- Coolify resource UUID: `ny7hl8gp7n9f3excayygzj0l` (Projekt 1 / production, Strato Server).
+- SSH: `root@jonas-server.de`, using the existing SSH key.
+- Deploy through the resource's **Redeploy** button, then verify its commit,
+  container health, and search runs. A push alone did not deploy automatically
+  during the September 2026 filter endpoint repair.
+
 Production target is **Coolify** using `docker-compose.coolify.yml`: no bundled Traefik (Coolify's own proxy terminates TLS + routes the domain assigned to the `web` service on port 80), no host port mappings, and `web` is built via `web/Dockerfile.prod` (nginx serving the built SPA + reverse-proxying `/api` to `api:8000`). nginx enforces basic-auth from `$BASIC_AUTH_USERS` (`web/docker-entrypoint.d/40-htpasswd.sh`, fail-closed if unset) while leaving `/api/telegram/webhook` and `/healthz` public.
 
 `docker-compose.yml` remains the **local dev** stack. As of 2026-06-09 it is fully unauthenticated AND bound to `127.0.0.1` only (Traefik gateway + Vite both loopback) — basic-auth was deliberately stripped from dev since it's localhost-only.
