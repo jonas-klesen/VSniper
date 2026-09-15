@@ -26,6 +26,71 @@ def _jwt_with_expiry(expiry: datetime) -> str:
     return f'{header}.{payload}.signature'
 
 
+def test_sizes_resolve_without_listing_constraints(monkeypatch) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    fixture = json.loads((Path(__file__).parent / 'fixtures/vinted/de/gateway_size_facets.json').read_text())
+    lookups: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v2/catalog/filters/facets':
+            return httpx.Response(404)
+        if request.url.path == '/web/gateway/svc-filters/filters/facets':
+            lookups.append(request.url.params)
+            assert request.url.params['attribute_ids[catalog]'] == '34'
+            constrained = any(key in request.url.params for key in ('search_text', 'price_from', 'price_to'))
+            return httpx.Response(200, json={'options': []} if constrained else fixture)
+        assert request.url.path == '/api/v2/catalog/items'
+        assert request.url.params['size_ids'] == '1640,1641'
+        assert request.url.params['search_text'] in ('long generated query', 'another query')
+        assert request.url.params['price_to'] == '30'
+        return httpx.Response(200, json={'items': []})
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='long generated query', region='de',
+        filters=[
+            SearchFilter(field='price', label='Price', values=['30'], mode='range'),
+            SearchFilter(field='size', label='Size', values=['W32 | DE 48', 'W33 | DE 48'], mode='include'),
+            SearchFilter(field='category', label='Category', values=['hosen'], mode='include'),
+        ],
+        last_run_at=None, last_found_count=0,
+    )
+    assert client.run_search(search, validate_session=False) == []
+    assert client.run_search(search.model_copy(update={'query': 'another query'}), validate_session=False) == []
+    assert len(lookups) == 1
+
+
+@pytest.mark.parametrize('sizes', [['not-a-size'], ['not-a-size', 'M']])
+def test_unresolved_sizes_never_remove_filter(monkeypatch, sizes) -> None:
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    fixture = json.loads((Path(__file__).parent / 'fixtures/vinted/de/gateway_size_facets.json').read_text())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v2/catalog/filters/facets':
+            return httpx.Response(200, json=fixture)
+        assert 'M' in sizes, 'unresolved sizes must prevent an unfiltered catalog request'
+        assert request.url.params['size_ids'] == '208'
+        return httpx.Response(200, json={'items': []})
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        filters=[SearchFilter(field='size', label='Size', values=sizes, mode='include')],
+        last_run_at=None, last_found_count=0,
+    )
+    if 'M' in sizes:
+        assert client.run_search(search, validate_session=False) == []
+    else:
+        with pytest.raises(VintedSearchError, match='size'):
+            client.run_search(search, validate_session=False)
+
+
 def test_search_uses_gateway_after_404(monkeypatch) -> None:
     monkeypatch.setattr(
         'vsniper.integrations.vinted.client.get_settings',
@@ -90,12 +155,14 @@ def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> 
             assert request.headers['locale'] == 'de-DE'
             assert request.url.params['attribute_ids[catalog]'] == '34'
             assert 'catalog_ids' not in request.url.params
-            assert request.url.params['search_text'] == 'cargo'
-            assert request.url.params['price_to'] == '30'
             assert request.url.params['currency'] == 'EUR'
             if field == 'size':
+                assert 'search_text' not in request.url.params
+                assert 'price_to' not in request.url.params
                 assert request.url.params['filter_code'] == 'size'
             else:
+                assert request.url.params['search_text'] == 'cargo'
+                assert request.url.params['price_to'] == '30'
                 assert request.url.params['filter_search_code'] == 'brand'
                 assert request.url.params['filter_search_text'] == 'M'
             return httpx.Response(200, json={'options': [{'id': 208, 'title': 'M'}]})

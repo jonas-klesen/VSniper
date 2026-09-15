@@ -1,0 +1,199 @@
+{
+  "filter_code": "size",
+  "options": [
+    {
+      "id": "MEN-DE",
+      "options": [
+        {
+          "id": "206",
+          "title": "XS",
+          "type": "default"
+        },
+        {
+          "id": "207",
+          "title": "S",
+          "type": "default"
+        },
+        {
+          "id": "208",
+          "title": "M",
+          "type": "default"
+        },
+        {
+          "id": "209",
+          "title": "L",
+          "type": "default"
+        },
+        {
+          "id": "210",
+          "title": "XL",
+          "type": "default"
+        },
+        {
+          "id": "211",
+          "title": "XXL",
+          "type": "default"
+        },
+        {
+          "id": "212",
+          "title": "XXXL",
+          "type": "default"
+        },
+        {
+          "id": "308",
+          "title": "4XL",
+          "type": "default"
+        },
+        {
+          "id": "309",
+          "title": "5XL",
+          "type": "default"
+        },
+        {
+          "id": "1192",
+          "title": "6XL",
+          "type": "default"
+        },
+        {
+          "id": "1193",
+          "title": "7XL",
+          "type": "default"
+        },
+        {
+          "id": "1194",
+          "title": "8XL",
+          "type": "default"
+        },
+        {
+          "id": "213",
+          "title": "Universal",
+          "type": "default"
+        }
+      ],
+      "title": "Größen Männer",
+      "type": "group"
+    },
+    {
+      "id": "MEN-PANTS",
+      "options": [
+        {
+          "id": "1631",
+          "title": "W23 | DE 38",
+          "type": "default"
+        },
+        {
+          "id": "1632",
+          "title": "W24 | DE 40",
+          "type": "default"
+        },
+        {
+          "id": "1633",
+          "title": "W25 | DE 40",
+          "type": "default"
+        },
+        {
+          "id": "1634",
+          "title": "W26 | DE 42",
+          "type": "default"
+        },
+        {
+          "id": "1635",
+          "title": "W27 | DE 42",
+          "type": "default"
+        },
+        {
+          "id": "1636",
+          "title": "W28 | DE 44",
+          "type": "default"
+        },
+        {
+          "id": "1637",
+          "title": "W29 | DE 44",
+          "type": "default"
+        },
+        {
+          "id": "1638",
+          "title": "W30 | DE 46",
+          "type": "default"
+        },
+        {
+          "id": "1639",
+          "title": "W31 | DE 46",
+          "type": "default"
+        },
+        {
+          "id": "1640",
+          "title": "W32 | DE 48",
+          "type": "default"
+        },
+        {
+          "id": "1641",
+          "title": "W33 | DE 48",
+          "type": "default"
+        },
+        {
+          "id": "1642",
+          "title": "W34 | DE 50",
+          "type": "default"
+        },
+        {
+          "id": "1662",
+          "title": "W35 | DE 50",
+          "type": "default"
+        },
+        {
+          "id": "1643",
+          "title": "W36 | DE 52",
+          "type": "default"
+        },
+        {
+          "id": "1644",
+          "title": "W38 | DE 54",
+          "type": "default"
+        },
+        {
+          "id": "1645",
+          "title": "W40 | DE 56",
+          "type": "default"
+        },
+        {
+          "id": "1646",
+          "title": "W42 | DE 58",
+          "type": "default"
+        },
+        {
+          "id": "1647",
+          "title": "W44 | DE 60",
+          "type": "default"
+        },
+        {
+          "id": "1648",
+          "title": "W46 | DE 62",
+          "type": "default"
+        },
+        {
+          "id": "1649",
+          "title": "W48 | DE 64",
+          "type": "default"
+        },
+        {
+          "id": "1704",
+          "title": "66 | W50",
+          "type": "default"
+        },
+        {
+          "id": "1705",
+          "title": "68 | W52",
+          "type": "default"
+        },
+        {
+          "id": "1706",
+          "title": "70 | W54",
+          "type": "default"
+        }
+      ],
+      "title": "Hosen für Herren",
+      "type": "group"
+    }
+  ]
+}

@@ -932,6 +932,12 @@ class VintedClient:
             )
             resolved.extend(option_ids)
 
+        if field == "size" and values and not resolved:
+            raise VintedSearchError(
+                f"None of the requested sizes could be resolved for search {search.id}; "
+                "check its size and category filters. Refusing to search without a size filter.",
+                retryable=False,
+            )
         return list(dict.fromkeys(resolved))
 
     @staticmethod
@@ -1045,6 +1051,10 @@ class VintedClient:
 
         params = self._filter_context_params(search=search, current_params=current_params)
         params["filter_code"] = "color" if field == "colour" else "status" if field == "condition" else field
+        if field == "size":
+            # Size IDs belong to a category, not the listings matching today's
+            # query or price range. Result constraints can hide valid sizes.
+            params = {key: value for key, value in params.items() if key in {"catalog_ids", "currency", "filter_code"}}
         cache_key = (
             search.region,
             params["filter_code"],
