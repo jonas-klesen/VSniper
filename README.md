@@ -96,6 +96,34 @@ If Vinted requests browser verification during an Add-by-URL import, use the
 action shown in the modal to open `/vinted-browser/`, solve it in the persistent
 browser, and retry the import.
 
+### Deploying updates to the existing production app
+
+- Coolify: https://coolify.jonas-klesen.de/
+- Application: https://vsniper.jonas-server.de/
+- Resource UUID: `ny7hl8gp7n9f3excayygzj0l` (`jonas-klesen/VSniper`, branch `main`).
+- The operator's local `~/.bashrc` defines `COOLIFY_API_KEY`. Load that value
+  privately; never print it, commit it, or include it in deployment reports.
+
+After validating and pushing the intended commits to `origin/main`, use the
+Coolify MCP if connected, or the authenticated API at
+`https://coolify.jonas-klesen.de/api/v1`. A push alone does not deploy this app.
+For an authorized deployment:
+
+1. Send `POST /deploy` with JSON
+   `{"uuid":"ny7hl8gp7n9f3excayygzj0l","force":false}` and
+   `Authorization: Bearer <COOLIFY_API_KEY>`.
+2. Save the returned `deployment_uuid` and poll
+   `GET /deployments/{deployment_uuid}` until `status` is `finished`. Check that
+   `commit` matches the pushed revision; investigate a failed or cancelled build.
+3. Verify the API, worker, web, and browser containers are healthy, the public
+   `/healthz` returns 200, and unauthenticated dashboard/API requests remain
+   protected. SSH access for inspection is `root@jonas-server.de` with the
+   existing SSH key.
+4. Verify fresh worker heartbeats and completed search runs after deployment.
+   For Vinted changes, check all six saved searches using the deployed client,
+   including filter resolution, and inspect new errors. Record the deployed
+   commit, deployment UUID, commands, and results in a local verification report.
+
 ## Development checks
 
 ```bash
