@@ -37,7 +37,7 @@ def test_sizes_resolve_without_listing_constraints(monkeypatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == '/api/v2/catalog/filters/facets':
             return httpx.Response(404)
-        if request.url.path == '/web/gateway/svc-filters/filters/facets':
+        if request.url.path == '/svc-filters/filters/facets':
             lookups.append(request.url.params)
             assert request.url.params['attribute_ids[catalog]'] == '34'
             constrained = any(key in request.url.params for key in ('search_text', 'price_from', 'price_to'))
@@ -91,21 +91,33 @@ def test_unresolved_sizes_never_remove_filter(monkeypatch, sizes) -> None:
             client.run_search(search, validate_session=False)
 
 
-def test_search_uses_gateway_after_404(monkeypatch) -> None:
+def test_search_uses_api_host_after_legacy_404(monkeypatch) -> None:
+    # A live search cannot reliably exercise endpoint retirement or upstream
+    # failures. Check routing here so a retired host cannot pass on fixture data.
+    token = _jwt_with_expiry(datetime.now(UTC) + timedelta(hours=2))
+    cookie = f'access_token_web={token}; anon_id=anon-1; csrf_token=csrf-1'
     monkeypatch.setattr(
         'vsniper.integrations.vinted.client.get_settings',
-        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+        lambda: SimpleNamespace(vinted_cookie=cookie, vinted_region='de'),
     )
     fixture = json.loads((Path(__file__).parent / 'fixtures/vinted/de/gateway_items.json').read_text())
     legacy_params: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == '/api/v2/catalog/items':
+            assert request.url.host == 'www.vinted.de'
             legacy_params.update(request.url.params)
             return httpx.Response(404, text='<html>Not found</html>')
-        assert request.url.path == '/web/gateway/svc-catalogue/items'
+        assert request.url.host == 'api.vinted.de'
+        assert request.url.path == '/svc-catalogue/items'
         assert request.headers['platform'] == 'web'
         assert request.headers['locale'] == 'de-DE'
+        assert request.headers['origin'] == 'https://www.vinted.de'
+        assert request.headers['referer'] == 'https://www.vinted.de/catalog'
+        assert request.headers['sec-fetch-site'] == 'same-site'
+        assert request.headers['cookie'] == cookie
+        assert request.headers['x-anon-id'] == 'anon-1'
+        assert request.headers['x-csrf-token'] == 'csrf-1'
         assert request.url.params['attribute_ids[catalog]'] == '34'
         assert request.url.params['attribute_ids[color]'] == '1'
         assert request.url.params['attribute_ids[status]'] == '2'
@@ -116,7 +128,7 @@ def test_search_uses_gateway_after_404(monkeypatch) -> None:
             assert request.url.params[key] == legacy_params[key]
         return httpx.Response(200, json=fixture)
 
-    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client = VintedClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
         id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
         filters=[
@@ -147,12 +159,15 @@ def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> 
     def handler(request: httpx.Request) -> httpx.Response:
         paths.append(request.url.path)
         if request.url.path == f'/api/v2/catalog/filters/{operation}':
+            assert request.url.host == 'www.vinted.de'
             return httpx.Response(404, json={
                 'code': 104, 'message': 'Artikel kann nicht mehr gefunden werden', 'message_code': 'not_found',
             })
-        if request.url.path == f'/web/gateway/svc-filters/filters/{operation}':
+        if request.url.path == f'/svc-filters/filters/{operation}':
+            assert request.url.host == 'api.vinted.de'
             assert request.headers['platform'] == 'web'
             assert request.headers['locale'] == 'de-DE'
+            assert request.headers['sec-fetch-site'] == 'same-site'
             assert request.url.params['attribute_ids[catalog]'] == '34'
             assert 'catalog_ids' not in request.url.params
             assert request.url.params['currency'] == 'EUR'
@@ -171,7 +186,7 @@ def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> 
         assert request.url.params['catalog_ids'] == '34'
         return httpx.Response(200, json={'items': []})
 
-    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client = VintedClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
         id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
         filters=[
@@ -185,7 +200,7 @@ def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> 
     assert client.run_search(search, validate_session=False) == []
     assert client.run_search(search, validate_session=False) == []
     assert paths == [
-        f'/api/v2/catalog/filters/{operation}', f'/web/gateway/svc-filters/filters/{operation}',
+        f'/api/v2/catalog/filters/{operation}', f'/svc-filters/filters/{operation}',
         '/api/v2/catalog/items', '/api/v2/catalog/items',
     ]
 
@@ -216,7 +231,7 @@ def test_filter_lookup_preserves_errors(monkeypatch, status, gateway) -> None:
     assert error.value.status_code == status
     expected = ['/api/v2/catalog/filters/facets']
     if gateway:
-        expected.append('/web/gateway/svc-filters/filters/facets')
+        expected.append('/svc-filters/filters/facets')
     assert paths == expected
 
 

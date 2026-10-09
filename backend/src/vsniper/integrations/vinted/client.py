@@ -30,6 +30,7 @@ FILTER_OPTION_CACHE_TTL = timedelta(hours=6)
 TOKEN_REFRESH_BUFFER = timedelta(minutes=5)
 VINTED_CATALOG_PER_PAGE = 96
 VINTED_CURRENCY = "EUR"
+VINTED_GATEWAY_BASE_URL = "https://api.vinted.de"
 VINTED_WEB_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -532,7 +533,7 @@ class VintedClient:
         payload = self._request_catalog(
             region=search.region,
             legacy_path="/api/v2/catalog/items",
-            gateway_path="/web/gateway/svc-catalogue/items",
+            gateway_path="/svc-catalogue/items",
             params=self._build_search_params(search),
         )
         items = self._extract_items(payload)
@@ -746,10 +747,14 @@ class VintedClient:
         if auth_required or self._cookie_is_expired():
             self._maybe_refresh_token()
 
-        url = f"{self._base_url_for_region(region)}{path}"
+        base_url = self._base_url_for_region(region)
         headers = self._request_headers(region=region)
-        if path.startswith("/web/gateway/"):
-            headers.update({"Platform": "web", "Locale": "de-DE"})
+        if path.startswith(("/svc-catalogue/", "/svc-filters/")):
+            # Vinted retired the www /web/gateway proxy. Keep the website
+            # Origin/Referer while calling the German API host directly.
+            base_url = self.base_url or VINTED_GATEWAY_BASE_URL
+            headers.update({"Platform": "web", "Locale": "de-DE", "Sec-Fetch-Site": "same-site"})
+        url = f"{base_url}{path}"
         cookie_header = self._cookie_header_value()
         if auth_required:
             cookie_header = self._cookie_header_value_or_raise()
@@ -1029,7 +1034,7 @@ class VintedClient:
         payload = self._request_catalog(
             region=search.region,
             legacy_path="/api/v2/catalog/filters/search",
-            gateway_path="/web/gateway/svc-filters/filters/search",
+            gateway_path="/svc-filters/filters/search",
             params=params,
         )
         options = payload.get("options")
@@ -1069,7 +1074,7 @@ class VintedClient:
         payload = self._request_catalog(
             region=search.region,
             legacy_path="/api/v2/catalog/filters/facets",
-            gateway_path="/web/gateway/svc-filters/filters/facets",
+            gateway_path="/svc-filters/filters/facets",
             params=params,
         )
         options = payload.get("options")
