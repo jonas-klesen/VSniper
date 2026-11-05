@@ -27,6 +27,7 @@ vite.config.d.ts
 .env
 .env.*
 !.env.example
+/DEPLOY.local.md
 
 # IDE / OS
 .DS_Store

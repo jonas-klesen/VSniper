@@ -54,6 +54,34 @@ npm install
 npm run dev
 ```
 
+## Local judge model
+
+By default, the worker judges listings with a local vision model. It calls an
+OpenAI-compatible server at `LOCAL_VLM_BASE_URL`. The code default is
+`http://127.0.0.1:8080/v1`. `.env.example` uses
+`http://host.docker.internal:8080/v1`, so the Docker containers can reach a
+server on the host. VSniper sends `POST /v1/responses` with a JSON schema, so
+use a recent llama.cpp build.
+
+This runs the model from the blog post with `llama-server`:
+
+```bash
+llama-server -hf LiquidAI/LFM2.5-VL-1.6B-GGUF:Q4_0 --alias lfm25-vl-clothing \
+  --host 0.0.0.0 --port 8080 --ctx-size 4096 --parallel 1 \
+  --image-min-tokens 64 --image-max-tokens 512
+```
+
+- `-hf` downloads the model and its vision projector on the first start.
+- `--host 0.0.0.0` lets the Docker containers connect. Do not expose port 8080
+  to a public network.
+- Check the server with `curl http://127.0.0.1:8080/health`.
+- Set `LOCAL_JUDGE_MODEL=lfm25-vl-clothing` before the first start. These
+  variables only seed a new database. After that, change models on the
+  **AI Models** page.
+
+To skip the local model, set `AI_JUDGE_PROVIDER=openai`. The judge then uses
+`AI_JUDGE_MODEL` with `AI_API_KEY`.
+
 ## Typical workflow
 
 1. Add wardrobe photos and assign each one to a clothing bucket.
@@ -96,33 +124,10 @@ If Vinted requests browser verification during an Add-by-URL import, use the
 action shown in the modal to open `/vinted-browser/`, solve it in the persistent
 browser, and retry the import.
 
-### Deploying updates to the existing production app
+### Updating production
 
-- Coolify: https://coolify.jonas-klesen.de/
-- Application: https://vsniper.jonas-server.de/
-- Resource UUID: `ny7hl8gp7n9f3excayygzj0l` (`jonas-klesen/VSniper`, branch `main`).
-- The operator's local `~/.bashrc` defines `COOLIFY_API_KEY`. Load that value
-  privately; never print it, commit it, or include it in deployment reports.
-
-After validating and pushing the intended commits to `origin/main`, use the
-Coolify MCP if connected, or the authenticated API at
-`https://coolify.jonas-klesen.de/api/v1`. A push alone does not deploy this app.
-For an authorized deployment:
-
-1. Send `POST /deploy` with JSON
-   `{"uuid":"ny7hl8gp7n9f3excayygzj0l","force":false}` and
-   `Authorization: Bearer <COOLIFY_API_KEY>`.
-2. Save the returned `deployment_uuid` and poll
-   `GET /deployments/{deployment_uuid}` until `status` is `finished`. Check that
-   `commit` matches the pushed revision; investigate a failed or cancelled build.
-3. Verify the API, worker, web, and browser containers are healthy, the public
-   `/healthz` returns 200, and unauthenticated dashboard/API requests remain
-   protected. SSH access for inspection is `root@jonas-server.de` with the
-   existing SSH key.
-4. Verify fresh worker heartbeats and completed search runs after deployment.
-   For Vinted changes, check all six saved searches using the deployed client,
-   including filter resolution, and inspect new errors. Record the deployed
-   commit, deployment UUID, commands, and results in a local verification report.
+A push alone does not redeploy. Trigger the deployment in Coolify after you push.
+Operator-specific access details live in an untracked `DEPLOY.local.md`.
 
 ## Development checks
 

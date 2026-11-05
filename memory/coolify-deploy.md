@@ -5,16 +5,8 @@ metadata:
   type: project
 ---
 
-## Production access
-
-- Coolify: https://coolify.jonas-klesen.de/
-- Application: https://vsniper.jonas-server.de/
-- Coolify resource UUID: `ny7hl8gp7n9f3excayygzj0l` (Projekt 1 / production, Strato Server).
-- SSH: `root@jonas-server.de`, using the existing SSH key.
-- Use the Coolify MCP if connected, otherwise the API with `COOLIFY_API_KEY`
-  from the operator's local `~/.bashrc`. Never expose the key. The current
-  deployment and verification procedure is in `README.md` and `AGENTS.md`.
-  A push alone does not deploy this resource.
+Production access details and the deploy procedure are in the untracked
+`DEPLOY.local.md`. A push alone does not deploy this resource.
 
 Production target is **Coolify** using `docker-compose.coolify.yml`: no bundled Traefik (Coolify's own proxy terminates TLS + routes the domain assigned to the `web` service on port 80), no host port mappings, and `web` is built via `web/Dockerfile.prod` (nginx serving the built SPA + reverse-proxying `/api` to `api:8000`). nginx enforces basic-auth from `$BASIC_AUTH_USERS` (`web/docker-entrypoint.d/40-htpasswd.sh`, fail-closed if unset) while leaving `/api/telegram/webhook` and `/healthz` public.
 
