@@ -63,19 +63,23 @@ OpenAI-compatible server at `LOCAL_VLM_BASE_URL`. The code default is
 server on the host. VSniper sends `POST /v1/responses` with a JSON schema, so
 use a recent llama.cpp build.
 
-This runs the model from the blog post with `llama-server`:
+The local judge uses **LiquidAI LFM3-VL-2B Q4_0**, with its Q8_0 vision
+projector. Use llama.cpp v0.8.0 or newer:
 
 ```bash
-llama-server -hf LiquidAI/LFM2.5-VL-1.6B-GGUF:Q4_0 --alias lfm25-vl-clothing \
+llama-server -hf LiquidAI/LFM3-VL-2B-GGUF:Q4_0 --alias lfm25-vl-clothing \
   --host 0.0.0.0 --port 8080 --ctx-size 4096 --parallel 1 \
-  --image-min-tokens 64 --image-max-tokens 512
+  --image-min-tokens 64 --image-max-tokens 512 --reasoning off
 ```
 
 - `-hf` downloads the model and its vision projector on the first start.
 - `--host 0.0.0.0` lets the Docker containers connect. Do not expose port 8080
   to a public network.
 - Check the server with `curl http://127.0.0.1:8080/health`.
-- Set `LOCAL_JUDGE_MODEL=lfm25-vl-clothing` before the first start. These
+- `--reasoning off` is required for direct structured judgments; default thinking
+  can exhaust the output budget before producing JSON.
+- `lfm25-vl-clothing` is a retained compatibility alias, not the model version.
+  Both local model defaults use it. These
   variables only seed a new database. After that, change models on the
   **AI Models** page.
 
