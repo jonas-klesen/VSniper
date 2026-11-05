@@ -583,6 +583,7 @@ def test_handle_telegram_webhook_records_feedback_from_delivery_callback(monkeyp
         yield FakeSession()
 
     def fake_apply_feedback(candidate_id, *, verdict: str, comment: str = '', skip_if_unchanged: bool = False):
+        assert acknowledgements == [{'callback_query_id': 'callback-telegram-1', 'text': 'Recording your like feedback…'}]
         candidate.feedback = verdict
         return SimpleNamespace(id='cand-3'), SimpleNamespace(id='snapshot-1')
 
@@ -625,7 +626,7 @@ def test_handle_telegram_webhook_records_feedback_from_delivery_callback(monkeyp
         },
     ]
     assert acknowledgements == [
-        {'callback_query_id': 'callback-telegram-1', 'text': 'Saved like feedback.'},
+        {'callback_query_id': 'callback-telegram-1', 'text': 'Recording your like feedback…'},
     ]
 
 
@@ -962,3 +963,49 @@ def test_telegram_webhook_route_smoke(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()['action'] == 'feedback_recorded'
+
+
+def test_reply_comment_is_deferred_and_confirmed(monkeypatch) -> None:
+    # Failures: blocking the webhook, losing the comment/verdict, or confirming before saving.
+    # Isolate scheduling to catch timing regressions that fast live AI responses can mask.
+    service = _build_telegram_service_without_init()
+    scheduled = []
+    sent = []
+    saved = []
+    service.telegram_client = SimpleNamespace(send_message=lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(
+        'vsniper.services.telegram_service._telegram_config',
+        lambda: TelegramRuntimeConfig('bot-token', '523', None, None),
+    )
+    delivery = SimpleNamespace(candidate_id='cand-3')
+    candidate = SimpleNamespace(id='cand-3', feedback='like')
+
+    class Session:
+        def scalar(self, query):
+            return delivery
+
+        def get(self, model, key):
+            return candidate
+
+    @contextmanager
+    def session():
+        yield Session()
+
+    monkeypatch.setattr('vsniper.services.telegram_service.session_scope', session)
+    def apply(candidate_id, **kwargs):
+        saved.append((candidate_id, kwargs))
+        return candidate, SimpleNamespace(id='snapshot')
+    service.candidates = SimpleNamespace(apply_feedback=apply)
+    result = service.handle_webhook(
+        TelegramUpdate.model_validate({
+            'update_id': 22,
+            'message': {'message_id': 78, 'chat': {'id': 523},
+                        'text': 'Great cut', 'reply_to_message': {'message_id': 77}},
+        }),
+        schedule_background=scheduled.append,
+    )
+    assert result.action == 'feedback_queued'
+    assert not saved and not sent
+    scheduled[0]()
+    assert saved == [('cand-3', {'verdict': 'like', 'comment': 'Great cut'})]
+    assert sent[0]['text'] == 'Saved comment for like candidate.'
