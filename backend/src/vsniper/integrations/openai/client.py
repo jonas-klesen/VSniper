@@ -48,6 +48,7 @@ CEREBRAS_API_BASE_URL = "https://api.cerebras.ai/v1"
 OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
 REFERENCE_OBSERVATIONS_MAX_OUTPUT_TOKENS = 12000
 TASTE_PROFILE_MAX_OUTPUT_TOKENS = 16000
+CANDIDATE_OBSERVATION_OPENROUTER_TOKEN_BUDGETS = (2000, 6000)
 POSITION_KEYS: tuple[GridPosition, ...] = (
     "top_left",
     "top_center",
@@ -485,6 +486,15 @@ def _parse_json_text(text: str) -> Any:
 
 def _parse_json_output(payload: dict[str, Any]) -> Any:
     return _parse_json_text(_extract_output_text(payload))
+
+
+def _chat_completion_truncated_without_content(payload: dict[str, Any]) -> bool:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return False
+    message = choices[0].get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return choices[0].get("finish_reason") == "length" and not content
 
 
 def _extract_chat_completion_text(payload: dict[str, Any], provider_name: str) -> str:
@@ -1452,15 +1462,23 @@ class OpenAITasteClient:
             },
         ]
         if provider == "openrouter":
-            payload = self._create_openrouter_chat_completion(
-                model=model_name,
-                content=content,
-                max_output_tokens=2000,
-                schema_name="single_observation",
-                schema=SINGLE_OBSERVATION_SCHEMA,
-                reasoning_effort=effort,
-            )
-            self._emit_usage("describe_candidate", model_name, payload, on_usage=on_usage)
+            # Reasoning models can spend the whole budget thinking and return
+            # finish_reason=length with no content; retry once with more room.
+            for max_output_tokens in CANDIDATE_OBSERVATION_OPENROUTER_TOKEN_BUDGETS:
+                payload = self._create_openrouter_chat_completion(
+                    model=model_name,
+                    content=content,
+                    max_output_tokens=max_output_tokens,
+                    schema_name="single_observation",
+                    schema=SINGLE_OBSERVATION_SCHEMA,
+                    reasoning_effort=effort,
+                )
+                self._emit_usage("describe_candidate", model_name, payload, on_usage=on_usage)
+                if not _chat_completion_truncated_without_content(payload):
+                    break
+                logger.warning(
+                    "OpenRouter observation truncated at %d output tokens before any content.", max_output_tokens
+                )
             raw = _parse_json_text(_extract_chat_completion_text(payload, "OpenRouter"))
         else:
             payload = self._create_response(

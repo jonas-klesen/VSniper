@@ -741,6 +741,50 @@ def test_describe_candidate_image_returns_structured_observation() -> None:
     assert "skate" in observation.vibe_keywords
 
 
+def test_openrouter_describe_candidate_image_retries_when_reasoning_exhausts_budget() -> None:
+    # Production 2026-11-06: Gemma 4 on OpenRouter spent the whole max_tokens budget on
+    # reasoning and returned finish_reason=length with content=null.
+    sent_budgets: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read().decode("utf-8"))
+        sent_budgets.append(payload["max_tokens"])
+        if len(sent_budgets) == 1:
+            message = {"role": "assistant", "content": None, "reasoning": "thinking..."}
+            return httpx.Response(200, json={"choices": [{"finish_reason": "length", "message": message}]})
+        observation = {
+            "garment_type": "cardigan",
+            "silhouette_and_cut": "relaxed V-neck",
+            "color_palette": "navy, red, mustard",
+            "fabric_and_texture": "cotton knit",
+            "prints_or_patterns": "geometric",
+            "details_and_hardware": "button placket",
+            "era_or_subculture": "90s",
+            "vibe_keywords": ["strickjacke", "coogi"],
+        }
+        message = {"role": "assistant", "content": json.dumps(observation)}
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": message}]})
+
+    client = OpenAITasteClient(
+        SimpleNamespace(
+            ai_learn_image_detail="low",
+            openrouter_api_key="test-key",
+            openrouter_api_base_url="https://openrouter.test/api/v1",
+        ),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    observation = client.describe_candidate_image(
+        image_bytes=_jpeg_bytes("red"),
+        provider="openrouter",
+        model="google/gemma-4-26b-a4b-it",
+        reasoning_effort="medium",
+    )
+
+    assert observation.garment_type == "cardigan"
+    assert len(sent_budgets) == 2
+    assert sent_budgets[1] > sent_budgets[0]
+
+
 def test_local_describe_candidate_image_uses_local_responses_schema() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "http://local-vlm.test/v1/responses"
