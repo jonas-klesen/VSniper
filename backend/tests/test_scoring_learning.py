@@ -367,7 +367,7 @@ def test_local_responses_grid_judgment_uses_configured_base_url_and_parses_fence
     def handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == "http://local-vlm.test/v1/responses"
         payload = json.loads(request.read().decode("utf-8"))
-        prompt_text = payload["input"][0]["content"][0]["text"]
+        prompt_text = payload["input"][-1]["content"][0]["text"]
         assert "labeled 1x1, 2x2, or 3x3 grid" in prompt_text
         assert "up to four photos of the same listing" not in prompt_text
         assert payload["model"] == "gemma4-12b-quality"
@@ -380,7 +380,7 @@ def test_local_responses_grid_judgment_uses_configured_base_url_and_parses_fence
             "labels",
             "concerns",
         ]
-        assert payload["input"][0]["content"][1]["type"] == "input_image"
+        assert payload["input"][-1]["content"][1]["type"] == "input_image"
         return httpx.Response(
             200,
             json={
@@ -417,6 +417,62 @@ def test_local_responses_grid_judgment_uses_configured_base_url_and_parses_fence
 
     assert result.judgments["candidate-a"].score == 8
     assert usage == [("judge_grid", "gemma4-12b-quality", 11, 7, 0)]
+
+
+def test_local_grid_judgment_sends_search_constant_context_as_leading_message() -> None:
+    """llama.cpp only reuses a cached prompt prefix for LFM3 from a checkpoint at a user-message
+    start that lies >= 256 tokens before the first differing token. The local request therefore
+    splits the unchanged prompt text so everything before the disliked anchors (constant per
+    search) is its own message, without altering the text the model reads."""
+    requests: dict[str, dict] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read().decode("utf-8"))
+        requests["local" if "json_schema" in payload else "openai"] = payload
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": '{"top_left":{"score":8,"explanation":"Fits.","labels":[],"concerns":[]}}',
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+    client = _mock_openai_client(handler)
+    for provider in ("local", "openai"):
+        client.judge_candidate_grid(
+            taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+            candidates=[CandidateImageInput(candidate_id="candidate-a", image_bytes=_jpeg_bytes("red"), title="Strickjacke")],
+            model="local-model" if provider == "local" else "gpt-5.4-mini",
+            reasoning_effort="low",
+            ai_judge_provider=provider,
+            local_vlm_base_url="http://local-vlm.test/v1",
+        )
+
+    openai_input = requests["openai"]["input"]
+    assert len(openai_input) == 1
+    openai_prompt = openai_input[0]["content"][0]["text"]
+
+    context_message, listing_message = requests["local"]["input"]
+    assert context_message["role"] == listing_message["role"] == "user"
+    assert [part["type"] for part in context_message["content"]] == ["input_text"]
+    assert [part["type"] for part in listing_message["content"]] == ["input_text", "input_image"]
+
+    context_text = context_message["content"][0]["text"]
+    listing_text = listing_message["content"][0]["text"]
+    assert "<taste>" in context_text
+    assert "Strickjacke" not in context_text
+    assert listing_text.startswith("Disliked anchors")
+    assert "<candidate_metadata>" in listing_text
+    assert context_text + listing_text == openai_prompt
 
 
 def test_grid_judgment_only_mentions_multi_image_tiles_when_enabled_for_multi_tile_grid() -> None:
