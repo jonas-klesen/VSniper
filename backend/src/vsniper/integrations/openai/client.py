@@ -48,7 +48,10 @@ CEREBRAS_API_BASE_URL = "https://api.cerebras.ai/v1"
 OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
 REFERENCE_OBSERVATIONS_MAX_OUTPUT_TOKENS = 12000
 TASTE_PROFILE_MAX_OUTPUT_TOKENS = 16000
-CANDIDATE_OBSERVATION_OPENROUTER_TOKEN_BUDGETS = (2000, 6000)
+CANDIDATE_OBSERVATION_OPENROUTER_TOKEN_BUDGETS = (4000, 8000)
+# Reasoning tokens count against max_tokens on OpenRouter; reserve room before the JSON.
+OPENROUTER_GRID_REASONING_HEADROOM_TOKENS = 2000
+GRID_MAX_OUTPUT_TOKENS_CEILING = 8000
 POSITION_KEYS: tuple[GridPosition, ...] = (
     "top_left",
     "top_center",
@@ -1852,6 +1855,8 @@ class OpenAITasteClient:
         # Scale the output budget to the grid size (plus headroom for OpenAI reasoning tokens),
         # so a full 9-judgment grid can't be truncated by a flat cap that was sized for 4.
         grid_max_output_tokens = 400 * len(expected_positions) + 800
+        if provider == "openrouter" and effort:
+            grid_max_output_tokens += OPENROUTER_GRID_REASONING_HEADROOM_TOKENS
 
         def _request_and_parse() -> Any:
             nonlocal grid_max_output_tokens
@@ -1894,10 +1899,15 @@ class OpenAITasteClient:
                 if payload.get("status") == "incomplete" and reason == "max_output_tokens":
                     # Truncated mid-grid: grow the budget before retrying so we don't re-truncate
                     # identically, rather than discard the whole batch non-retryably.
-                    grid_max_output_tokens = min(int(grid_max_output_tokens * 1.5), 8000)
+                    grid_max_output_tokens = min(int(grid_max_output_tokens * 1.5), GRID_MAX_OUTPUT_TOKENS_CEILING)
                     raise _retryable_error(
                         f"OpenAI grid judgment truncated; retrying with {grid_max_output_tokens} output tokens."
                     )
+            if provider == "openrouter" and _chat_completion_truncated_without_content(payload):
+                grid_max_output_tokens = min(int(grid_max_output_tokens * 1.5), GRID_MAX_OUTPUT_TOKENS_CEILING)
+                raise _retryable_error(
+                    f"OpenRouter grid judgment truncated; retrying with {grid_max_output_tokens} output tokens."
+                )
             try:
                 if provider == "cerebras":
                     return _parse_json_text(_extract_chat_completion_text(payload, "Cerebras"))

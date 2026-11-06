@@ -228,6 +228,46 @@ def test_openai_grid_judgment_maps_quadrants_to_candidates() -> None:
     assert result.judgments["candidate-b"].concerns == ["Plain"]
 
 
+def test_openrouter_grid_judgment_retries_when_reasoning_exhausts_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Production 2026-11-01 (error #472): the OpenRouter fallback judge returned
+    # finish_reason=length with content=null after reasoning used the whole budget.
+    monkeypatch.setattr("vsniper.integrations._retry.time.sleep", lambda _seconds: None)
+    sent_budgets: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read().decode("utf-8"))
+        sent_budgets.append(payload["max_tokens"])
+        if len(sent_budgets) == 1:
+            message = {"role": "assistant", "content": None, "reasoning": "thinking..."}
+            return httpx.Response(200, json={"choices": [{"finish_reason": "length", "message": message}]})
+        content = (
+            '{"top_left":{"score":72,"explanation":"Bold knit.","labels":["Knit"],"concerns":[]},'
+            '"top_right":null,"bottom_left":null,"bottom_right":null}'
+        )
+        message = {"role": "assistant", "content": content}
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": message}]})
+
+    client = OpenAITasteClient(
+        SimpleNamespace(
+            ai_judge_image_detail="low",
+            openrouter_api_key="test-key",
+            openrouter_api_base_url="https://openrouter.test/api/v1",
+        ),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    result = client.judge_candidate_grid(
+        taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+        candidates=[CandidateImageInput(candidate_id="candidate-a", image_bytes=_jpeg_bytes("red"))],
+        model="deepseek/deepseek-v4.1-flash-1017",
+        reasoning_effort="medium",
+        ai_judge_provider="openrouter",
+    )
+
+    assert result.judgments["candidate-a"].score == 72
+    assert len(sent_budgets) == 2
+    assert sent_budgets[1] > sent_budgets[0]
+
+
 def test_openai_grid_judgment_includes_metadata_in_prompt() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.read().decode("utf-8"))
