@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -329,8 +330,9 @@ class CandidateService:
         comment: str | None = None,
         skip_if_unchanged: bool = False,
     ) -> tuple[CandidateRecord, LearningSnapshot | None]:
-        """Record feedback/note using the scan path's three-phase shape so image download + VLM
-        observation never run while a DB write transaction (SQLite write lock) is held."""
+        """Record feedback/note without holding a DB write transaction (SQLite write lock) during
+        image downloads, and without making the caller wait for the VLM observation: the vote is
+        committed first and the observation is computed and applied on a background thread."""
         # Phase 1 — short read txn: decide whether an observation is needed and snapshot the
         # settings it requires. expire_on_commit=False keeps the loaded candidate columns
         # readable after the session closes, so the VLM call below can use them while detached.
@@ -354,12 +356,7 @@ class CandidateService:
                 session, candidate_id=candidate_id
             )
 
-        # Phase 2 — network/VLM, no DB transaction held.
-        observation = (
-            self._compute_candidate_observation(candidate_model, obs_settings)
-            if obs_settings is not None
-            else None
-        )
+        # Phase 2 — network, no DB transaction held.
         # Download the feedback-sample images here, outside the Phase 3 write txn, so the durable
         # asset download (up to 6 × 20s) never holds a SQLite write lock (would risk BUSY_SNAPSHOT).
         # Skip if the sample already has durable paths (re-recording feedback on the same candidate).
@@ -367,20 +364,57 @@ class CandidateService:
             candidate_id=candidate_id, image_urls=candidate_image_urls
         )
 
-        # Phase 3 — short write txn: persist feedback + the precomputed observation.
+        # Phase 3 — short write txn: persist feedback.
         with session_scope() as session:
-            candidate_model = session.get(Candidate, candidate_id)
-            if candidate_model is None:
+            persisted = session.get(Candidate, candidate_id)
+            if persisted is None:
                 raise KeyError(candidate_id)
-            return self.record_feedback_in_session(
+            result = self.record_feedback_in_session(
                 session,
-                candidate_model=candidate_model,
+                candidate_model=persisted,
                 verdict=verdict,
                 comment=comment,
                 skip_if_unchanged=skip_if_unchanged,
-                observation=observation,
                 stored_image_paths=stored_image_paths,
             )
+
+        # Phase 4 — the VLM observation takes 5-30 s; run it after the vote is committed so the
+        # web request and Telegram callback return immediately.
+        if obs_settings is not None:
+            threading.Thread(
+                target=self._apply_observation_in_background,
+                args=(candidate_model, obs_settings, stored_image_paths),
+                name=f"feedback-observation-{candidate_id}",
+                daemon=True,
+            ).start()
+        return result
+
+    def _apply_observation_in_background(
+        self,
+        candidate_model: Candidate,
+        obs_settings: _ObservationSettings,
+        stored_image_paths: list[str],
+    ) -> None:
+        try:
+            observation = self._compute_candidate_observation(candidate_model, obs_settings)
+            if observation is None:
+                return
+            with session_scope() as session:
+                candidate = session.get(Candidate, candidate_model.id)
+                # Another feedback or process may have filled it in meanwhile.
+                if candidate is None or candidate.ai_observation:
+                    return
+                candidate.ai_observation = observation
+                # Refresh the taste sample so it carries the observation as learning evidence.
+                self.preferences.upsert_candidate_feedback_sample(
+                    session,
+                    candidate=candidate,
+                    verdict=None,
+                    comment=candidate.feedback_comment or "",
+                    stored_image_paths=stored_image_paths,
+                )
+        except Exception:
+            logger.exception("Background learning observation failed for candidate %s.", candidate_model.id)
 
     def record_feedback_in_session(
         self,
@@ -390,7 +424,6 @@ class CandidateService:
         verdict: Literal["like", "dislike"] | None,
         comment: str | None = None,
         skip_if_unchanged: bool = False,
-        observation: dict | None = None,
         stored_image_paths: list[str] | None = None,
     ) -> tuple[CandidateRecord, LearningSnapshot | None]:
         cleaned_comment = comment.strip() if comment is not None else None
@@ -407,10 +440,6 @@ class CandidateService:
             candidate_model.feedback = verdict
         if cleaned_comment is not None:
             candidate_model.feedback_comment = cleaned_comment
-        # The observation was computed outside this transaction; apply it only if we still lack
-        # one (another process may have filled it in between phases).
-        if observation is not None and not candidate_model.ai_observation:
-            candidate_model.ai_observation = observation
         self.preferences.upsert_candidate_feedback_sample(
             session,
             candidate=candidate_model,

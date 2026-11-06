@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -140,9 +142,11 @@ def test_candidate_page_defaults_to_recent_unreviewed_candidates_sorted_by_score
     assert [candidate.id for candidate in page.items] == ["recent-high", "recent-low"]
 
 
-def test_feedback_observation_is_applied_before_taste_sample_upsert(monkeypatch, tmp_path) -> None:
+def test_feedback_returns_before_observation_and_applies_it_in_background(monkeypatch, tmp_path) -> None:
+    # Production 2026-11-06: a web like waited 10 s on the observation call and the browser lost
+    # the response (HTTP 0) although the like was saved. The vote must not wait for the VLM.
     service, factory = _setup(monkeypatch, tmp_path)
-    seen_observation: dict = {}
+    upserted_observations: list[dict] = []
 
     class PreferencesRecorder:
         def existing_feedback_image_paths(self, session, *, candidate_id):
@@ -154,7 +158,7 @@ def test_feedback_observation_is_applied_before_taste_sample_upsert(monkeypatch,
         def upsert_candidate_feedback_sample(
             self, session, *, candidate, verdict, comment, stored_image_paths=None
         ):
-            seen_observation.update(candidate.ai_observation or {})
+            upserted_observations.append(dict(candidate.ai_observation or {}))
 
     service.preferences = PreferencesRecorder()
     service.settings = SimpleNamespace()
@@ -165,24 +169,39 @@ def test_feedback_observation_is_applied_before_taste_sample_upsert(monkeypatch,
         clothing_item="hosen",
         garment_type="cargo trousers",
     ).model_dump(mode="json")
+    release_observation = threading.Event()
 
-    # apply_feedback computes the observation in its network phase (no DB txn held) and applies
-    # it in the write phase before the taste sample is upserted. Stub the settings lookup +
-    # network call so the test does not need a real settings row or VLM call.
+    def slow_observation(candidate_model, obs_settings):
+        assert release_observation.wait(timeout=5)
+        return observation_payload
+
     monkeypatch.setattr(CandidateService, "_get_settings_state", staticmethod(lambda candidate_model: object()))
     monkeypatch.setattr(service, "_observation_settings", lambda session, db_settings: object())
-    monkeypatch.setattr(
-        service, "_compute_candidate_observation", lambda candidate_model, obs_settings: observation_payload
-    )
+    monkeypatch.setattr(service, "_compute_candidate_observation", slow_observation)
 
     with factory() as session:
         session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
         session.add(_candidate("candidate-1", created_at=datetime.now(UTC)))
         session.commit()
 
-    service.apply_feedback("candidate-1", verdict="like")
+    record, _ = service.apply_feedback("candidate-1", verdict="like")
 
-    assert seen_observation["garment_type"] == "cargo trousers"
+    assert record.feedback == "like"
+    assert upserted_observations == [{}]
+
+    release_observation.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with factory() as session:
+            if session.get(Candidate, "candidate-1").ai_observation:
+                break
+        time.sleep(0.02)
+
+    with factory() as session:
+        candidate = session.get(Candidate, "candidate-1")
+        assert candidate.feedback == "like"
+        assert candidate.ai_observation["garment_type"] == "cargo trousers"
+    assert upserted_observations[-1]["garment_type"] == "cargo trousers"
 
 
 def test_feedback_comment_can_be_cleared(monkeypatch, tmp_path) -> None:
