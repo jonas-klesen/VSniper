@@ -7,6 +7,7 @@ until the 3x stale cutoff, while a run still "running" is only recoverable once 
 from __future__ import annotations
 
 from contextlib import contextmanager
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,7 +20,7 @@ from vsniper.db.models import AiModelConfig, AppSettingsState, Candidate, Search
 from vsniper.domain.contracts import ScoreTrace, SearchFilter, SearchRecord, SearchRunResult, SearchUpdate, TasteProfile
 from vsniper.integrations.vinted.client import VintedSessionError
 from vsniper.integrations.vinted.categories import CategoryFilterError
-from vsniper.services._mapping import build_session_health, candidate_to_contract
+from vsniper.services._mapping import as_aware, build_session_health, candidate_to_contract
 from vsniper.services.operations_service import CLAIM_STALE_THRESHOLD
 from vsniper.services.search_defaults import CANONICAL_CLOTHING_ITEMS, canonical_search_values
 from vsniper.services.search_service import (
@@ -242,6 +243,32 @@ def test_api_live_run_claims_before_running(monkeypatch, tmp_path) -> None:
 
     assert result.summary == "ok"
     assert calls == [("s1", "live")]
+
+
+def test_live_run_keeps_its_claim_fresh_while_running(monkeypatch, tmp_path) -> None:
+    # Production 2026-11-06: backlog runs judged for >25 min while the claim was only
+    # refreshed before fetch and after judging, so the worker's 420 s stale cutoff
+    # would let a second run of the same search start and orphan the live one.
+    service, factory = _setup(monkeypatch, tmp_path)
+    monkeypatch.setattr("vsniper.services.search_service._CLAIM_HEARTBEAT_INTERVAL_SECONDS", 0.02)
+    claimed_at: list[datetime] = []
+
+    def slow_run(search_id: str, *, mode: str, trigger: str = "worker") -> SearchRunResult:
+        claimed_at.append(as_aware(_row(factory).last_claimed_at))
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            time.sleep(0.02)
+            latest = as_aware(_row(factory).last_claimed_at)
+            if latest > claimed_at[0]:
+                claimed_at.append(latest)
+                break
+        return SearchRunResult(search_id=search_id, mode="live", fetched_candidates=0, alert_candidates=0, summary="ok")
+
+    monkeypatch.setattr(service, "_run", slow_run)
+
+    service.run_live("s1")
+
+    assert len(claimed_at) == 2, "claim was not refreshed while the run was in progress"
 
 
 def test_api_live_run_rejects_active_claim(monkeypatch, tmp_path) -> None:

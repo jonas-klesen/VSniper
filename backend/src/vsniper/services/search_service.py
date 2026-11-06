@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock, Thread
 from typing import Any
 
 import httpx
@@ -81,6 +82,9 @@ SESSION_HEALTH_REFRESH_INTERVAL = timedelta(minutes=15)
 _CACHE_MAX_AGE_DAYS = 30
 _CACHE_MAX_SIZE_MB = 500
 _MANUAL_RUN_STALE_AFTER = timedelta(minutes=30)
+# A live run refreshes its DB claim on this cadence so slow judging never looks stale to
+# claim_for_run (the worker's stale cutoff is 420 s).
+_CLAIM_HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
 def _apply_size_filter(filters: list[SearchFilter], sizes: list[str]) -> list[SearchFilter]:
@@ -374,7 +378,24 @@ class SearchService:
                 if not self._search_exists(search_id):
                     raise KeyError(search_id)
                 raise SearchRunAlreadyClaimed(search_id)
-        return self._run(search_id, mode="live", trigger=trigger)
+        with self._claim_heartbeat(search_id):
+            return self._run(search_id, mode="live", trigger=trigger)
+
+    @contextmanager
+    def _claim_heartbeat(self, search_id: str) -> Iterator[None]:
+        stop = Event()
+
+        def _beat() -> None:
+            while not stop.wait(_CLAIM_HEARTBEAT_INTERVAL_SECONDS):
+                self._refresh_claim(search_id)
+
+        thread = Thread(target=_beat, name=f"claim-heartbeat-{search_id}", daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            thread.join(timeout=5)
 
     def run_all_enabled(self) -> list[SearchRunResult]:
         """Run every enabled search live, sequentially. Per-search failures are skipped so one

@@ -3,16 +3,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from vsniper.services.search_service import _CLAIM_HEARTBEAT_INTERVAL_SECONDS
 from vsniper.worker import scheduler
-
-_HEARTBEAT_INTERVAL_SECONDS = 30
 
 
 def test_worker_stale_cutoff_is_at_least_three_heartbeats() -> None:
-    # _run() refreshes last_claimed_at every _HEARTBEAT_INTERVAL_SECONDS while active.
+    # Live runs refresh last_claimed_at every _CLAIM_HEARTBEAT_INTERVAL_SECONDS while active.
     # stale_after must exceed at least 3× that interval so transient DB hiccups don't
     # trigger a false reclaim of a legitimately in-flight scan.
-    assert scheduler._WORKER_CLAIM_STALE_AFTER >= timedelta(seconds=3 * _HEARTBEAT_INTERVAL_SECONDS)
+    assert scheduler._WORKER_CLAIM_STALE_AFTER >= timedelta(seconds=3 * _CLAIM_HEARTBEAT_INTERVAL_SECONDS)
 
 
 def test_worker_passes_explicit_stale_after_to_claim(monkeypatch) -> None:
