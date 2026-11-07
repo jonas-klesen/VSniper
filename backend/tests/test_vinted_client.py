@@ -866,6 +866,40 @@ def test_vinted_client_resolves_real_mens_category_aliases(monkeypatch) -> None:
     assert len(requested_urls) == 1
 
 
+def test_vinted_client_sends_the_fixed_bucket_catalog_ids(monkeypatch) -> None:
+    from vsniper.integrations.vinted.categories import default_category_filter_for_clothing_item
+
+    token = _jwt_with_expiry(datetime.now(UTC) + timedelta(hours=2))
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie=token, vinted_region='de'),
+    )
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v2/catalog/items':
+            sent.append(request.url.params['catalog_ids'])
+            return httpx.Response(200, json={"items": []})
+        raise AssertionError(f'unexpected request: {request.method} {request.url}')
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-obenrum_kalt',
+        name='Obenrum Kalt',
+        enabled=True,
+        clothing_item='obenrum_kalt',
+        query='strickjacke',
+        region='de',
+        filters=[default_category_filter_for_clothing_item('obenrum_kalt')],
+        last_run_at=None,
+        last_found_count=0,
+    )
+
+    assert client.run_search(search, validate_session=False) == []
+    # Strickpullover für den Winter, Strickjacken, Jacken & Mäntel.
+    assert sent == ['1815,266,1206']
+
+
 def test_vinted_client_skips_unresolved_category_filters(monkeypatch) -> None:
     token = _jwt_with_expiry(datetime.now(UTC) + timedelta(hours=2))
     monkeypatch.setattr(

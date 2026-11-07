@@ -220,7 +220,7 @@ class SearchService:
                 raise SearchClothingItemImmutable(
                     "A saved search is fixed to its clothing bucket. Edit the target bucket's existing search instead."
                 )
-            filters = ensure_category_filter_for_clothing_item(payload.filters, model.clothing_item, strict=True)
+            filters = ensure_category_filter_for_clothing_item(payload.filters, model.clothing_item)
 
             model.name = CLOTHING_ITEM_LABELS.get(model.clothing_item, model.name)
             model.query = payload.query
@@ -330,7 +330,7 @@ class SearchService:
                 draft_filters = [
                     f for f in draft.filters if f.field.strip().lower() != "size" and not _is_price_filter(f)
                 ]
-                filters = ensure_category_filter_for_clothing_item(draft_filters, draft.clothing_item, strict=True)
+                filters = ensure_category_filter_for_clothing_item(draft_filters, draft.clothing_item)
                 filter_payload = [
                     *existing_size_filters,
                     *existing_price_filters,
@@ -902,7 +902,6 @@ class SearchService:
                     "filters": ensure_category_filter_for_clothing_item(
                         search_record.filters,
                         search_record.clothing_item,
-                        strict=False,
                     )
                 }
             )

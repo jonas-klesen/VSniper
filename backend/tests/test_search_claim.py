@@ -19,7 +19,7 @@ from vsniper.core.database import Base
 from vsniper.db.models import AiModelConfig, AppSettingsState, Candidate, Search, SearchRun
 from vsniper.domain.contracts import ScoreTrace, SearchFilter, SearchRecord, SearchRunResult, SearchUpdate, TasteProfile
 from vsniper.integrations.vinted.client import VintedSessionError
-from vsniper.integrations.vinted.categories import CategoryFilterError
+from vsniper.integrations.vinted.categories import default_category_filter_for_clothing_item
 from vsniper.services._mapping import as_aware, build_session_health, candidate_to_contract
 from vsniper.services.operations_service import CLAIM_STALE_THRESHOLD
 from vsniper.services.search_defaults import CANONICAL_CLOTHING_ITEMS, canonical_search_values
@@ -383,8 +383,7 @@ def test_update_injects_category_filter_from_clothing_item(monkeypatch, tmp_path
         ),
     )
 
-    assert record.filters[0].field == "category"
-    assert record.filters[0].values == ["hosen", "jeans", "shorts"]
+    assert record.filters == [default_category_filter_for_clothing_item("hosen")]
     assert record.name == "Hosen"
 
 
@@ -405,21 +404,22 @@ def test_update_rejects_changing_clothing_item(monkeypatch, tmp_path) -> None:
         )
 
 
-def test_update_rejects_mismatched_category_filter(monkeypatch, tmp_path) -> None:
+def test_update_replaces_a_submitted_category_filter_with_the_fixed_one(monkeypatch, tmp_path) -> None:
     service, _ = _setup(monkeypatch, tmp_path)
 
-    with pytest.raises(CategoryFilterError, match="outside Hosen"):
-        service.update(
-            "s1",
-            SearchUpdate(
-                name="Bad trousers",
-                clothing_item="hosen",
-                query="cargo",
-                region="de",
-                enabled=True,
-                filters=[SearchFilter(field="category", label="Category", values=["schuhe"], mode="include")],
-            ),
-        )
+    record = service.update(
+        "s1",
+        SearchUpdate(
+            name="Trousers",
+            clothing_item="hosen",
+            query="cargo",
+            region="de",
+            enabled=True,
+            filters=[SearchFilter(field="category", label="Category", values=["schuhe"], mode="include")],
+        ),
+    )
+
+    assert record.filters == [default_category_filter_for_clothing_item("hosen")]
 
 
 def test_persist_run_sets_created_at_before_queueing_new_alert(monkeypatch, tmp_path) -> None:

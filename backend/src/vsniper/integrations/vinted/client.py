@@ -22,7 +22,7 @@ from vsniper.integrations.vinted.browser import (
     BrowserListingUnavailableError,
     VintedBrowserClient,
 )
-from vsniper.integrations.vinted.category_aliases import CATEGORY_ALIAS_IDS
+from vsniper.integrations.vinted.categories import category_ids_for_alias
 
 
 SESSION_HEALTH_TTL = timedelta(minutes=15)
@@ -850,7 +850,7 @@ class VintedClient:
             "currency": VINTED_CURRENCY,
             "order": "newest_first",
         }
-        # Category/catalog resolution is purely static (CATEGORY_ALIAS_IDS) and never depends on
+        # Category/catalog resolution is purely static (fixed bucket catalogs) and never depends on
         # anything else in `params`, whereas dynamic facet-based resolution for other id-based
         # fields (size, brand) only scopes itself to catalog_ids if it's already in `params`.
         # Resolve category/catalog filters first regardless of their stored position in
@@ -949,7 +949,7 @@ class VintedClient:
     def _static_filter_ids(*, field: str, normalized_value: str) -> list[str]:
         field = VintedClient._normalise_filter_field(field)
         if field in {"category", "catalog"}:
-            return CATEGORY_ALIAS_IDS.get(normalized_value, [])
+            return category_ids_for_alias(normalized_value)
         if field in {"colour", "color"}:
             return COLOR_ALIAS_IDS.get(normalized_value, [])
         if field in {"condition", "status"}:

@@ -8,7 +8,6 @@ from vsniper.domain.contracts import (
     SearchUpdate,
     VintedSizesResult,
 )
-from vsniper.integrations.vinted.categories import CategoryFilterError
 from vsniper.integrations.vinted.client import VintedClientError, VintedConfigurationError, VintedSessionError
 from vsniper.services.maintenance_service import get_maintenance_state
 from vsniper.services.search_service import SearchClothingItemImmutable, SearchNotConfigured, SearchRunAlreadyClaimed
@@ -42,8 +41,6 @@ def update_search(search_id: str, payload: SearchUpdate) -> SearchRecord:
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Search not found") from exc
     except SearchClothingItemImmutable as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except CategoryFilterError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 

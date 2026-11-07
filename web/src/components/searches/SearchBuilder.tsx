@@ -22,7 +22,6 @@ import {
 } from '../../lib/searchFilters';
 import type {
   ClothingItem,
-  SearchCategoryOption,
   SearchCategoryOptions,
   SearchFilter,
   SearchRecord,
@@ -53,40 +52,6 @@ function setCategoryAliases(form: SearchFormState, aliases: string[]): SearchFor
       'front',
     ),
   };
-}
-
-type CategoryChoiceGroup = {
-  key: string;
-  primaryAlias: string;
-  aliases: string[];
-  catalogIds: string[];
-};
-
-function categoryIdsForAlias(option: SearchCategoryOption, alias: string): string[] {
-  return option.alias_catalog_ids?.[alias] ?? [alias];
-}
-
-function categoryGroupKey(ids: string[]): string {
-  return ids.length ? [...ids].sort().join('|') : '__unresolved__';
-}
-
-function groupCategoryAliases(option: SearchCategoryOption): CategoryChoiceGroup[] {
-  const groups = new Map<string, CategoryChoiceGroup>();
-  for (const alias of option.allowed_aliases) {
-    const catalogIds = categoryIdsForAlias(option, alias);
-    const key = categoryGroupKey(catalogIds);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.aliases.push(alias);
-      continue;
-    }
-    groups.set(key, { key, primaryAlias: alias, aliases: [alias], catalogIds });
-  }
-  return Array.from(groups.values());
-}
-
-function selectedCategoryGroupKeys(option: SearchCategoryOption, selectedAliases: string[]): Set<string> {
-  return new Set(selectedAliases.map((alias) => categoryGroupKey(categoryIdsForAlias(option, alias))));
 }
 
 function setDefaultCategoryAliases(
@@ -126,11 +91,12 @@ export function setPriceCeiling(form: SearchFormState, value: string): SearchFor
   };
 }
 
+// Categories are fixed per clothing item by the backend, so the form always carries them.
 export function withDefaultCategoryFilter(
   form: SearchFormState,
   categoryOptions?: SearchCategoryOptions,
 ): SearchFormState {
-  return valuesFor(form.filters, isCategoryFilter).length ? form : setDefaultCategoryAliases(form, categoryOptions);
+  return categoryOptions ? setDefaultCategoryAliases(form, categoryOptions) : form;
 }
 
 export function formFromSearch(search: SearchRecord): SearchFormState {
@@ -238,64 +204,27 @@ function TokenInput({
 function CategoryPicker({
   form,
   categoryOptions,
-  onChange,
 }: {
   form: SearchFormState;
   categoryOptions?: SearchCategoryOptions;
-  onChange: (form: SearchFormState) => void;
 }) {
   const option = categoryOptions?.[form.clothing_item];
-  const selected = valuesFor(form.filters, isCategoryFilter);
-  const visibleSelection = selected.length ? selected : option?.default_aliases ?? [];
-  const groupedChoices = option ? groupCategoryAliases(option) : [];
-  const selectedGroupKeys = option ? selectedCategoryGroupKeys(option, visibleSelection) : new Set<string>();
-
-  const toggleGroup = (group: CategoryChoiceGroup) => {
-    const aliasesInGroup = new Set(group.aliases);
-    const active = selectedGroupKeys.has(group.key);
-    const next = active
-      ? visibleSelection.filter((value) => !aliasesInGroup.has(value))
-      : [...visibleSelection.filter((value) => !aliasesInGroup.has(value)), group.primaryAlias];
-    onChange(setCategoryAliases(form, next));
-  };
 
   return (
     <div className="search-builder-section">
       <div className="search-builder-section__header">
-        <div>
-          <h4>Vinted category</h4>
-          <p className="muted">Choose safe category aliases for {clothingItemLabel(form.clothing_item)}. This keeps Vinted from searching the wrong closet aisle.</p>
-        </div>
-        <button
-          type="button"
-          className="secondary inline-action"
-          onClick={() => onChange(setDefaultCategoryAliases(form, categoryOptions))}
-          disabled={!option}
-        >
-          Use defaults
-        </button>
+        <h4>Vinted category</h4>
       </div>
       {!option ? (
-        <p className="muted">Loading category choices…</p>
+        <p className="muted">Loading categories…</p>
       ) : (
-        <>
-          <div className="choice-chip-row">
-            {groupedChoices.map((group) => (
-              <button
-                type="button"
-                className={`choice-chip ${selectedGroupKeys.has(group.key) ? 'active' : ''}`}
-                key={group.key}
-                onClick={() => toggleGroup(group)}
-                title={group.aliases.length > 1 ? `Vinted catalog ID${group.catalogIds.length > 1 ? 's' : ''} ${group.catalogIds.join(', ')}: ${group.aliases.join(', ')}` : undefined}
-              >
-                {group.primaryAlias}{group.aliases.length > 1 ? ` (+${group.aliases.length - 1})` : ''}
-              </button>
-            ))}
-          </div>
-          <p className="muted small-copy">
-            Defaults: {option.default_aliases.join(', ')} · resolves to {option.resolved_catalog_ids.length} Vinted catalog IDs.
-          </p>
-        </>
+        <div className="choice-chip-row">
+          {option.default_aliases.map((title) => (
+            <span className="choice-chip active" key={title}>
+              {title}
+            </span>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -321,7 +250,7 @@ function GuidedFilterEditor({
 
   return (
     <div className="search-builder-rules">
-      <CategoryPicker form={form} categoryOptions={categoryOptions} onChange={onChange} />
+      <CategoryPicker form={form} categoryOptions={categoryOptions} />
 
       <div className="search-builder-side-stack">
         <div className="search-builder-section">

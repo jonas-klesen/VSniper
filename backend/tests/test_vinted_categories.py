@@ -7,15 +7,25 @@ from fastapi.testclient import TestClient
 
 from vsniper.api.main import app
 from vsniper.domain.contracts import SearchFilter
+from vsniper.domain.contracts import CLOTHING_ITEM_LABELS
+from vsniper.services.search_service import SearchService
 from vsniper.integrations.vinted.categories import (
-    ALLOWED_CATEGORY_ALIASES_BY_ITEM,
-    CategoryFilterError,
     category_ids_for_alias,
     clothing_items_for_size_group,
     default_category_filter_for_clothing_item,
     ensure_category_filter_for_clothing_item,
     resolved_category_ids_for_aliases,
 )
+
+# Vinted.de Herren catalog IDs, read from the live catalog tree on 2026-11-07.
+EXPECTED_CATALOG_IDS = {
+    "schuhe": ["1242", "1233"],
+    "hosen": ["34", "257"],
+    "obenrum_warm": ["76"],
+    "obenrum_mittel": ["1811", "267", "1812", "1813", "264", "265", "1814"],
+    "obenrum_kalt": ["1815", "266", "1206"],
+    "kopf": ["86"],
+}
 
 
 @pytest.mark.parametrize(
@@ -34,20 +44,19 @@ def test_bucket_category_aliases_resolve(alias: str, expected_ids: list[str]) ->
     assert category_ids_for_alias(alias) == expected_ids
 
 
-def test_every_allowed_bucket_alias_resolves() -> None:
-    for clothing_item, aliases in ALLOWED_CATEGORY_ALIASES_BY_ITEM.items():
-        unresolved = [alias for alias in aliases if not category_ids_for_alias(alias)]
-        assert unresolved == [], f"{clothing_item} has unresolved aliases: {unresolved}"
-        assert resolved_category_ids_for_aliases(aliases)
-
-
-def test_default_category_filter_is_available_for_every_bucket() -> None:
-    for clothing_item in ALLOWED_CATEGORY_ALIASES_BY_ITEM:
+def test_fixed_categories_are_exact_vinted_catalogs_without_overlap() -> None:
+    owner: dict[str, str] = {}
+    for clothing_item in CLOTHING_ITEM_LABELS:
         filter_item = default_category_filter_for_clothing_item(clothing_item)
         assert filter_item.field == "category"
         assert filter_item.mode == "include"
-        assert filter_item.values
-        assert resolved_category_ids_for_aliases(filter_item.values)
+        # Each fixed title resolves to exactly one catalog ID, in table order.
+        assert [category_ids_for_alias(value) for value in filter_item.values] == [
+            [catalog_id] for catalog_id in EXPECTED_CATALOG_IDS[clothing_item]
+        ]
+        for catalog_id in EXPECTED_CATALOG_IDS[clothing_item]:
+            assert catalog_id not in owner, f"{catalog_id} is in both {owner.get(catalog_id)} and {clothing_item}"
+            owner[catalog_id] = clothing_item
 
 
 @pytest.mark.parametrize(
@@ -72,58 +81,34 @@ def test_clothing_items_for_size_group(description: str, expected_items: list[st
 
 
 def test_missing_category_filter_is_injected() -> None:
-    filters = ensure_category_filter_for_clothing_item(
-        [SearchFilter(field="size", label="Sizes", values=["M"], mode="include")],
-        "obenrum_warm",
-        strict=True,
-    )
+    size = SearchFilter(field="size", label="Sizes", values=["M"], mode="include")
 
-    assert filters[0].field == "category"
-    assert filters[0].values == ["tops", "t-shirts"]
-    assert filters[1].field == "size"
+    filters = ensure_category_filter_for_clothing_item([size], "obenrum_warm")
+
+    assert filters == [default_category_filter_for_clothing_item("obenrum_warm"), size]
 
 
-def test_unresolved_category_filter_is_replaced_in_lenient_mode() -> None:
-    filters = ensure_category_filter_for_clothing_item(
-        [SearchFilter(field="category", label="Category", values=["space wizard"], mode="include")],
-        "hosen",
-        strict=False,
-    )
+def test_stored_category_filter_is_replaced_by_the_fixed_categories() -> None:
+    """Taste recomputes used to pick category aliases, producing overlapping parent/child
+    catalogs (tops for both warm and mid layers). Categories are fixed per bucket now."""
+    size = SearchFilter(field="size", label="Sizes", values=["L"], mode="include")
+    stored = SearchFilter(field="category", label="Kategorie", values=["tops", "pullovers"], mode="include")
 
-    assert filters == [default_category_filter_for_clothing_item("hosen")]
+    filters = ensure_category_filter_for_clothing_item([stored, size], "obenrum_mittel")
 
-
-def test_mismatched_category_filter_is_rejected_in_strict_mode() -> None:
-    with pytest.raises(CategoryFilterError, match="outside Hosen"):
-        ensure_category_filter_for_clothing_item(
-            [SearchFilter(field="category", label="Category", values=["schuhe"], mode="include")],
-            "hosen",
-            strict=True,
-        )
+    assert filters == [default_category_filter_for_clothing_item("obenrum_mittel"), size]
+    assert resolved_category_ids_for_aliases(filters[0].values) == EXPECTED_CATALOG_IDS["obenrum_mittel"]
 
 
-def test_search_category_options_route_exposes_bucket_metadata(monkeypatch) -> None:
-    fake_searches = SimpleNamespace(
-        category_options=lambda: {
-            clothing_item: {
-                "label": clothing_item.title(),
-                "description": f"{clothing_item} description",
-                "default_aliases": [aliases[0]],
-                "allowed_aliases": aliases,
-                "alias_catalog_ids": {alias: category_ids_for_alias(alias) for alias in aliases},
-                "resolved_catalog_ids": resolved_category_ids_for_aliases(aliases),
-            }
-            for clothing_item, aliases in ALLOWED_CATEGORY_ALIASES_BY_ITEM.items()
-        }
-    )
-    monkeypatch.setattr("vsniper.api.routes.searches.get_state", lambda: SimpleNamespace(searches=fake_searches))
+def test_search_category_options_route_exposes_fixed_categories(monkeypatch) -> None:
+    searches = SearchService.__new__(SearchService)
+    monkeypatch.setattr("vsniper.api.routes.searches.get_state", lambda: SimpleNamespace(searches=searches))
 
     response = TestClient(app).get("/api/searches/category-options")
 
     assert response.status_code == 200
     data = response.json()
-    assert set(data) == set(ALLOWED_CATEGORY_ALIASES_BY_ITEM)
-    assert data["hosen"]["default_aliases"] == [ALLOWED_CATEGORY_ALIASES_BY_ITEM["hosen"][0]]
-    assert "cargo" in data["hosen"]["allowed_aliases"]
-    assert data["hosen"]["alias_catalog_ids"]["cargo"] == category_ids_for_alias("cargo")
-    assert data["hosen"]["resolved_catalog_ids"]
+    assert set(data) == set(CLOTHING_ITEM_LABELS)
+    kalt = data["obenrum_kalt"]
+    assert kalt["default_aliases"] == kalt["allowed_aliases"] == ["Strickpullover für den Winter", "Strickjacken", "Jacken & Mäntel"]
+    assert kalt["resolved_catalog_ids"] == EXPECTED_CATALOG_IDS["obenrum_kalt"]

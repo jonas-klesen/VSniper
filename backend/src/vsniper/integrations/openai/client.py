@@ -20,10 +20,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from vsniper.core.config import Settings
 from vsniper.integrations._retry import retry_transient
-from vsniper.integrations.vinted.categories import (
-    category_options_by_clothing_item,
-    ensure_category_filter_for_clothing_item,
-)
+from vsniper.integrations.vinted.categories import default_category_filter_for_clothing_item
 from vsniper.domain.contracts import (
     CLOTHING_ITEM_DESCRIPTIONS,
     CLOTHING_ITEM_LABELS,
@@ -33,7 +30,6 @@ from vsniper.domain.contracts import (
     GeneratedSearchDraft,
     LabeledExample,
     ReferenceObservation,
-    SearchFilter,
     TasteProfile,
 )
 
@@ -174,28 +170,15 @@ TASTE_PROFILE_SCHEMA: dict[str, Any] = {
                         },
                     },
                     "transparency_labels": STRING_ARRAY_SCHEMA,
+                    # Categories, sizes and price are fixed by the app, so a draft has no filters.
                     "generated_search": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["name", "query", "region", "filters", "rationale"],
+                        "required": ["name", "query", "region", "rationale"],
                         "properties": {
                             "name": {"type": "string"},
                             "query": {"type": "string"},
                             "region": {"type": "string"},
-                            "filters": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "required": ["field", "label", "values", "mode"],
-                                    "properties": {
-                                        "field": {"type": "string"},
-                                        "label": {"type": "string"},
-                                        "values": STRING_ARRAY_SCHEMA,
-                                        "mode": {"type": "string", "enum": ["include", "exclude", "range", "exact"]},
-                                    },
-                                },
-                            },
                             "rationale": {"type": "string"},
                         },
                     },
@@ -1450,7 +1433,6 @@ class OpenAITasteClient:
                 key: {"label": CLOTHING_ITEM_LABELS[key], "description": CLOTHING_ITEM_DESCRIPTIONS[key]}
                 for key in CLOTHING_ITEM_LABELS
             },
-            "vinted_category_options_by_clothing_item": category_options_by_clothing_item(),
         }
         content = [
             {
@@ -1490,10 +1472,8 @@ class OpenAITasteClient:
                     "9. For every item profile, use that item's own samples as the strongest signal. Then let the "
                     "other clothing items leak in as cross_item_influence: palette, era, humor, texture, subculture, "
                     "and silhouette principles that should carry across categories without forcing exact item matches.\n"
-                    "10. Every generated_search.filters array MUST include exactly one include-mode filter with "
-                    "field='category' and values chosen exactly from the allowed_aliases for that clothing_item in "
-                    "vinted_category_options_by_clothing_item. Prefer the listed default_aliases unless there is a "
-                    "clear reason to use another allowed alias. Do not invent category names or catalog IDs.\n"
+                    "10. generated_search has no filters: the app fixes each clothing_item's Vinted categories, "
+                    "sizes and price. Put only search words in the query, never category names or sizes.\n"
                     "11. The user is eclectic - stay descriptive, not prescriptive. Do not close the door on adjacent "
                     "subcultures unless the evidence is explicit.\n"
                     "12. Treat `liked_examples_from_history` and `disliked_examples_from_history` as the HIGHEST-priority "
@@ -1545,14 +1525,9 @@ class OpenAITasteClient:
                 continue
             item_key = cast(ClothingItem, clothing_item)
             search_raw = raw.get("generated_search") or {}
-            try:
-                filters = [SearchFilter.model_validate(item) for item in search_raw.get("filters", [])]
-            except Exception:
-                filters = []
-            # Budget belongs to the user, not to a model-generated taste draft.  Drop
-            # it defensively even if a model ignores the prompt's no-price instruction.
-            filters = [filter_ for filter_ in filters if filter_.field.strip().lower() != "price"]
-            filters = ensure_category_filter_for_clothing_item(filters, item_key, strict=False)
+            # Model-written filters are ignored: categories are fixed per bucket, and sizes and
+            # price belong to the user.
+            filters = [default_category_filter_for_clothing_item(item_key)]
             draft = GeneratedSearchDraft(
                 id=f"draft-{uuid4().hex[:8]}",
                 clothing_item=item_key,
@@ -1594,7 +1569,7 @@ class OpenAITasteClient:
                 name=f"{label} search",
                 query="",
                 region=region,
-                filters=ensure_category_filter_for_clothing_item([], clothing_item, strict=False),
+                filters=[default_category_filter_for_clothing_item(clothing_item)],
                 rationale="Fallback draft because the model omitted this clothing item.",
                 created_at=now,
             )
