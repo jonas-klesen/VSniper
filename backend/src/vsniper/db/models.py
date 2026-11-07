@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Intege
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from vsniper.core.database import Base
+from vsniper.domain.contracts import JUDGE_MAX_PHOTOS
 
 
 class Search(Base):
@@ -178,6 +179,7 @@ class AppSettingsState(Base):
     observation_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     vlm_judge_parallel_requests: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     ai_judge_image_max_px: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
+    ai_judge_max_photos: Mapped[int] = mapped_column(Integer, default=JUDGE_MAX_PHOTOS, nullable=False)
     alert_threshold: Mapped[int] = mapped_column(Integer, default=95, nullable=False)
     scan_interval_seconds: Mapped[int] = mapped_column(Integer, default=1800, nullable=False)
     session_health: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)

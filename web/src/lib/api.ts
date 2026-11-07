@@ -48,6 +48,7 @@ type SettingsUpdatePayload = {
   observation_model_id: string | null;
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;
+  ai_judge_max_photos: number;
   alert_threshold: number;
   scan_interval_seconds: number;
 };
@@ -60,6 +61,7 @@ export type SettingsSavePayload = Omit<
   | 'observation_model_id'
   | 'vlm_judge_parallel_requests'
   | 'ai_judge_image_max_px'
+  | 'ai_judge_max_photos'
 >;
 
 // The AI Models page owns this subset of Settings. Keeping it separate from the
@@ -74,6 +76,7 @@ export type AiModelSettingsSavePayload = Pick<
   | 'observation_model_id'
   | 'vlm_judge_parallel_requests'
   | 'ai_judge_image_max_px'
+  | 'ai_judge_max_photos'
 >;
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';

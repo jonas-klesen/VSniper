@@ -32,6 +32,7 @@ from vsniper.integrations.openai.client import (
     CandidateImageInput,
     OpenAIIntegrationError,
 )
+from vsniper.integrations.vinted.client import VintedSearchError
 from vsniper.services._mapping import ResolvedAiModel
 from vsniper.services.search_service import SearchService
 
@@ -115,6 +116,7 @@ def _db_settings(
     ai_judge_allow_openai_fallback: bool = False,
     ai_judge_fallback_provider: str | None = None,
     cerebras_judge_model: str = "gemma-4-31b",
+    ai_judge_max_photos: int = 1,
 ) -> SimpleNamespace:
     """Builds a plain settings namespace plus the registry-resolved judge/fallback models that
     `_judge_candidates`/`_judge_listing` now take as explicit params (post AI-models-registry
@@ -155,6 +157,7 @@ def _db_settings(
     return SimpleNamespace(
         vlm_judge_parallel_requests=vlm_judge_parallel_requests,
         ai_judge_image_max_px=512,
+        ai_judge_max_photos=ai_judge_max_photos,
         judge_model=judge_model,
         judge_fallback_model=judge_fallback_model,
     )
@@ -211,6 +214,53 @@ def _raw(external_id: str, title: str = "A listing", brand: str = "Brand") -> di
         "features": [],
         "raw_listing": {},
     }
+
+
+def _judge_downloads(service: SearchService, raw: dict, db_settings) -> list[list[str]]:
+    """Judge one listing and return the photo URL lists handed to the image download."""
+    seen: list[list[str]] = []
+    jpeg = _jpeg()
+
+    def _download(*, candidate_id: str, image_urls: list[str]) -> CandidateImageInput:
+        seen.append(list(image_urls))
+        return CandidateImageInput(candidate_id=candidate_id, image_bytes=jpeg)
+
+    service.taste_client.judge_candidate.return_value = CandidateJudgment(
+        score=80, explanation="ok", labels=[], concerns=[]
+    )
+    with patch.object(service, "_download_candidate_image", side_effect=_download):
+        _call_judge(service, [raw], _search(), TasteProfile(summary="", taste_prompt="likes vintage"), db_settings)
+    return seen
+
+
+def test_listing_page_photos_are_judged_up_to_the_photo_limit() -> None:
+    service = _make_service()
+    page_photos = [f"https://images.vinted.de/page-{index}.jpg" for index in range(5)]
+    service.vinted_client.fetch_listing_photo_urls.return_value = page_photos
+
+    seen = _judge_downloads(service, _raw("item-1"), _db_settings(ai_judge_max_photos=3))
+
+    service.vinted_client.fetch_listing_photo_urls.assert_called_once_with("https://vinted.de/item-1")
+    assert seen == [page_photos[:3]]
+
+
+def test_search_photo_is_judged_when_the_listing_page_fails() -> None:
+    service = _make_service()
+    service.vinted_client.fetch_listing_photo_urls.side_effect = VintedSearchError("Vinted unavailable", retryable=True)
+
+    seen = _judge_downloads(service, _raw("item-1"), _db_settings(ai_judge_max_photos=4))
+
+    assert seen == [["https://images.vinted.de/item-1.jpg"]]
+    assert service.taste_client.judge_candidate.call_count == 1
+
+
+def test_single_photo_limit_skips_the_listing_page() -> None:
+    service = _make_service()
+
+    seen = _judge_downloads(service, _raw("item-1"), _db_settings(ai_judge_max_photos=1))
+
+    service.vinted_client.fetch_listing_photo_urls.assert_not_called()
+    assert seen == [["https://images.vinted.de/item-1.jpg"]]
 
 
 def test_all_candidates_are_judged() -> None:

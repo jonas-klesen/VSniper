@@ -34,6 +34,7 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   observation_model_id: null,
   vlm_judge_parallel_requests: 1,
   ai_judge_image_max_px: 512,
+  ai_judge_max_photos: 6,
 };
 
 function parsePositiveNumber(value: string, fallback: number): number {
@@ -77,6 +78,7 @@ export function AiModelsPage() {
       observation_model_id: settingsQuery.data.observation_model_id,
       vlm_judge_parallel_requests: settingsQuery.data.vlm_judge_parallel_requests,
       ai_judge_image_max_px: settingsQuery.data.ai_judge_image_max_px,
+      ai_judge_max_photos: settingsQuery.data.ai_judge_max_photos,
     });
   }, [settingsQuery.data, aiSettingsDirty]);
 
@@ -306,6 +308,16 @@ export function AiModelsPage() {
                   value={String(aiSettings.ai_judge_image_max_px)}
                   normalize={(raw) => String(Math.max(64, Math.min(2048, Math.round(parsePositiveNumber(raw, aiSettings.ai_judge_image_max_px)))))}
                   onCommit={(normalized) => setAiSetting('ai_judge_image_max_px', Number(normalized))}
+                />
+              </label>
+              <label>
+                Max photos per prompt
+                <DecimalInput
+                  type="text"
+                  inputMode="numeric"
+                  value={String(aiSettings.ai_judge_max_photos)}
+                  normalize={(raw) => String(Math.max(1, Math.min(20, Math.round(parsePositiveNumber(raw, aiSettings.ai_judge_max_photos)))))}
+                  onCommit={(normalized) => setAiSetting('ai_judge_max_photos', Number(normalized))}
                 />
               </label>
             </div>

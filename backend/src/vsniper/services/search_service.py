@@ -532,10 +532,25 @@ class SearchService:
         tmp_path.rename(cache_path)
         return response.content, content_type, cache_path
 
+    def _judge_photo_urls(self, raw: dict, *, max_photos: int) -> list[str]:
+        """Photo URLs to judge a listing by: its listing page's photos, else the search result's.
+
+        Catalog search returns only the main photo, so more than one photo needs the listing page.
+        """
+        search_urls = list(raw.get("image_urls") or [])
+        if max_photos <= 1 or not raw.get("url"):
+            return search_urls[:max_photos]
+        try:
+            page_urls = self.vinted_client.fetch_listing_photo_urls(raw["url"])
+        except VintedClientError as exc:
+            _logger.warning("listing photos unavailable for %s, judging the search photo: %s", raw["url"], exc)
+            page_urls = []
+        return (page_urls or search_urls)[:max_photos]
+
     def _download_candidate_image(self, *, candidate_id: str, image_urls: list[str]) -> CandidateImageInput | None:
         if not image_urls:
             return None
-        urls = image_urls[:4]
+        urls = image_urls
         cache_paths = [self._candidate_cache_path(candidate_id, image_index=i) for i in range(len(urls))]
 
         usable: list[tuple[bytes, str, Path] | None] = [None] * len(urls)
@@ -684,22 +699,19 @@ class SearchService:
         if selected:
             _evict_stale_cache(self.settings.resolve_path(self.settings.cache_dir) / "candidate-images")
             download_failed_ids: list[str] = []
+            max_photos = db_settings.ai_judge_max_photos
+
+            def _fetch_photos(candidate_id: str, raw: dict) -> CandidateImageInput | None:
+                return self._download_candidate_image(
+                    candidate_id=candidate_id,
+                    image_urls=self._judge_photo_urls(raw, max_photos=max_photos),
+                )
+
             with ThreadPoolExecutor(max_workers=min(len(selected), 8)) as pool:
-                futures_in_order = [
-                    (
-                        pool.submit(
-                            self._download_candidate_image,
-                            candidate_id=cid,
-                            image_urls=(raw.get("image_urls", []) or [])[:1],
-                        ),
-                        cid,
-                        raw,
-                    )
-                    for cid, raw in selected
-                ]
+                futures_in_order = [(pool.submit(_fetch_photos, cid, raw), cid, raw) for cid, raw in selected]
                 for future, candidate_id, raw in futures_in_order:
                     try:
-                        image_input = future.result(timeout=30)
+                        image_input = future.result(timeout=60)
                     except FutureTimeoutError:
                         _logger.warning("image download timed out for candidate %s", candidate_id)
                         image_input = None
@@ -1473,6 +1485,8 @@ class SearchService:
                 model.vlm_judge_parallel_requests = _judge_request_concurrency(payload.vlm_judge_parallel_requests)
             if payload.ai_judge_image_max_px is not None:
                 model.ai_judge_image_max_px = max(64, min(2048, int(payload.ai_judge_image_max_px)))
+            if payload.ai_judge_max_photos is not None:
+                model.ai_judge_max_photos = payload.ai_judge_max_photos
             if payload.alert_threshold is not None:
                 model.alert_threshold = _alert_threshold(payload.alert_threshold)
             if payload.scan_interval_seconds is not None:

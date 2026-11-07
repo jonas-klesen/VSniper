@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -560,6 +561,39 @@ def test_local_judgment_sends_search_constant_context_as_leading_message() -> No
     assert listing_text.startswith("Disliked anchors")
     assert "<candidate_metadata>" in listing_text
     assert context_text + listing_text == openai_prompt
+
+
+def test_judgment_sends_each_listing_photo_as_its_own_image() -> None:
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.read().decode("utf-8")))
+        text = '{"score":8,"explanation":"Strong color.","labels":["color"],"concerns":[]}'
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": text}}]})
+
+    portrait = BytesIO()
+    Image.new("RGB", (600, 800), "blue").save(portrait, format="JPEG")
+    client = _mock_openai_client(handler)
+    for extra in ([], [portrait.getvalue(), _jpeg_bytes("green")]):
+        client.judge_candidate(
+            taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+            candidate=CandidateImageInput(candidate_id="a", image_bytes=_jpeg_bytes("red"), extra_image_bytes=extra),
+            model="local-model",
+            reasoning_effort="low",
+            ai_judge_provider="local",
+            local_vlm_base_url="http://local-vlm.test/v1",
+            image_max_px=400,
+        )
+
+    single, several = (request["messages"][1]["content"] for request in requests)
+    assert [part["type"] for part in single] == ["text", "image_url"]
+    assert [part["type"] for part in several] == ["text", "image_url", "image_url", "image_url"]
+    assert "3 photos" not in single[0]["text"]
+    assert "3 photos" in several[0]["text"]
+    # Each photo keeps its aspect ratio instead of being padded into a square.
+    second_url = several[2]["image_url"]["url"]
+    with Image.open(BytesIO(base64.b64decode(second_url.split(",", 1)[1]))) as second:
+        assert second.size == (300, 400)
 
 
 def test_local_judgment_accepts_loose_bullets() -> None:

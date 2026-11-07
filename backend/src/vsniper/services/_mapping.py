@@ -338,6 +338,7 @@ def settings_to_contract(model: AppSettingsState, session: Session) -> SettingsS
             ],
             "vlm_judge_parallel_requests": model.vlm_judge_parallel_requests,
             "ai_judge_image_max_px": model.ai_judge_image_max_px,
+            "ai_judge_max_photos": model.ai_judge_max_photos,
             "alert_threshold": _coerce_alert_threshold(getattr(model, "alert_threshold", 95)),
             "scan_interval_seconds": getattr(model, "scan_interval_seconds", 1800),
             "blocked_brands": list(model.blocked_brands or []),

@@ -56,6 +56,12 @@ def test_settings_update_accepts_single_parallel_request() -> None:
     assert SettingsUpdate.model_validate(payload).vlm_judge_parallel_requests == 1
 
 
+@pytest.mark.parametrize("photos", [0, 21])
+def test_settings_update_rejects_out_of_range_photo_limit(photos: int) -> None:
+    with pytest.raises(ValidationError):
+        SettingsUpdate.model_validate({"vinted_region": "de", "ai_judge_max_photos": photos})
+
+
 def test_settings_update_rejects_invalid_alert_threshold() -> None:
     payload = {
         "vinted_region": "de",

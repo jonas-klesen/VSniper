@@ -217,6 +217,38 @@ class _ListingPageMetadataParser(HTMLParser):
         return [url for _, url in sorted(self._photo_urls.items())]
 
 
+_PAGE_DATA_CHUNK_RE = re.compile(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)</script>', re.DOTALL)
+_PAGE_DATA_PHOTOS_KEY = '"photos":['
+
+
+def _page_data_photo_urls(page_text: str) -> list[str]:
+    """Photo URLs from the listing's embedded page data, main photo first.
+
+    The server-rendered gallery has only five <img> tags; the page data lists every photo. Each
+    data chunk is a JSON string literal; the listing's own photo list is the first one that marks
+    a main photo. Returns [] when the page data has no such list.
+    """
+    decoder = json.JSONDecoder()
+    for match in _PAGE_DATA_CHUNK_RE.finditer(page_text):
+        if _PAGE_DATA_PHOTOS_KEY not in match.group(1).replace('\\"', '"'):
+            continue
+        try:
+            chunk = json.loads(f'"{match.group(1)}"')
+        except json.JSONDecodeError:
+            continue
+        start = chunk.find(_PAGE_DATA_PHOTOS_KEY)
+        while start != -1:
+            try:
+                photos, _ = decoder.raw_decode(chunk, start + len(_PAGE_DATA_PHOTOS_KEY) - 1)
+            except json.JSONDecodeError:
+                photos = None
+            if isinstance(photos, list) and any(isinstance(p, dict) and p.get("is_main") for p in photos):
+                urls = [str(p["url"]) for p in photos if isinstance(p, dict) and p.get("url")]
+                return list(dict.fromkeys(urls))
+            start = chunk.find(_PAGE_DATA_PHOTOS_KEY, start + 1)
+    return []
+
+
 class VintedClientError(RuntimeError):
     def __init__(self, message: str, *, retryable: bool, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -627,6 +659,31 @@ class VintedClient:
             )
 
         return self._listing_from_page_text(response.text, url=url, item_id=item_id)
+
+    def fetch_listing_photo_urls(self, url: str, *, region: str = "de") -> list[str]:
+        """Return every photo URL on a listing page, main photo first.
+
+        Catalog search returns only the main photo. This runs for every judged listing, so it
+        reads the public page anonymously over plain HTTP and depends on neither the scan
+        session nor the listing browser.
+        """
+        path = self._listing_path_for_client(url)
+        headers = self._request_headers(region=region)
+        headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        response = self._get_listing_page_response(f"{self._base_url_for_region(region)}{path}", headers)
+        if not response.is_success:
+            raise VintedSearchError(
+                self._non_success_detail(method="GET", path=path, response=response, cookie_header=None),
+                retryable=response.status_code >= 500,
+                status_code=response.status_code,
+            )
+        gallery_urls = _page_data_photo_urls(response.text)
+        if gallery_urls:
+            return gallery_urls
+        parser = _ListingPageMetadataParser()
+        parser.feed(response.text)
+        parser.close()
+        return parser.image_urls
 
     @staticmethod
     def _listing_from_page_text(page_text: str, *, url: str, item_id: str) -> dict[str, Any]:

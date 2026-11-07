@@ -365,6 +365,7 @@ export type SettingsSnapshot = {
   models: AiModelConfig[];
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;
+  ai_judge_max_photos: number;
   alert_threshold: number;
   scan_interval_seconds: number;
   blocked_brands: string[];

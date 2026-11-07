@@ -14,6 +14,10 @@ AiProvider = Literal["openai", "cerebras", "local", "openrouter"]
 TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note"]
 ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
 
+# Photos of one listing sent to the judge, each as its own image input. Vinted allows 20 per listing.
+JUDGE_MAX_PHOTOS = 6
+JUDGE_MAX_PHOTOS_LIMIT = 20
+
 CLOTHING_ITEM_LABELS: dict[ClothingItem, str] = {
     "schuhe": "Schuhe",
     "hosen": "Hosen",
@@ -415,6 +419,7 @@ class SettingsSnapshot(BaseModel):
     models: list[AiModelConfig] = Field(default_factory=list)
     vlm_judge_parallel_requests: int = 1
     ai_judge_image_max_px: int = 512
+    ai_judge_max_photos: int = JUDGE_MAX_PHOTOS
     alert_threshold: int = 95
     scan_interval_seconds: int = 1800
     blocked_brands: list[str] = Field(default_factory=list)
@@ -690,6 +695,7 @@ class SettingsUpdate(BaseModel):
     observation_model_id: str | None = None
     vlm_judge_parallel_requests: int | None = None
     ai_judge_image_max_px: int | None = None
+    ai_judge_max_photos: int | None = Field(default=None, ge=1, le=JUDGE_MAX_PHOTOS_LIMIT)
     alert_threshold: int | None = None
     scan_interval_seconds: int | None = None
 

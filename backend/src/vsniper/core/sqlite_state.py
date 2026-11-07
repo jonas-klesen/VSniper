@@ -21,6 +21,7 @@ from vsniper.core.database import dispose_engine, init_database, session_scope
 from vsniper.db.models import AiModelConfig as AiModelConfigRow, AiUsageEvent, AppSettingsState, Search, TasteState
 from vsniper.integrations.openai.pricing import compute_cost
 from vsniper.domain.contracts import (
+    JUDGE_MAX_PHOTOS,
     SettingsSnapshot,
 )
 from vsniper.integrations.openai.client import OpenAITasteClient
@@ -151,6 +152,7 @@ def _default_settings(now: datetime) -> SettingsSnapshot:
         learning_configured=False,
         vlm_judge_parallel_requests=runtime.vlm_judge_parallel_requests,
         ai_judge_image_max_px=512,
+        ai_judge_max_photos=JUDGE_MAX_PHOTOS,
         alert_threshold=95,
         scan_interval_seconds=runtime.scan_interval_seconds,
         session_health=build_session_health(region=runtime.vinted_region),
@@ -283,6 +285,7 @@ class AppState:
                     observation_model_id=observation_model_id,
                     vlm_judge_parallel_requests=settings.vlm_judge_parallel_requests,
                     ai_judge_image_max_px=settings.ai_judge_image_max_px,
+                    ai_judge_max_photos=settings.ai_judge_max_photos,
                     alert_threshold=settings.alert_threshold,
                     scan_interval_seconds=settings.scan_interval_seconds,
                     session_health=settings.session_health.model_dump(mode="json"),

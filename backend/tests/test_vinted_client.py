@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -1244,3 +1245,59 @@ def test_fetch_user_sizes_empty_when_none_selected(monkeypatch) -> None:
     sizes = client.fetch_user_sizes(region='de')
 
     assert sizes == []
+
+
+def test_fetch_listing_photo_urls_reads_every_photo_without_the_browser(monkeypatch) -> None:
+    # Catalog search returns only the main photo, so judging reads the rest from the listing page.
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='access_token_web=stale-token', vinted_region='de'),
+    )
+    fixture = Path(__file__).parent / 'fixtures' / 'vinted' / 'de' / 'item_9491586544.html'
+    cookies: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == '/items/9491586544-hose-mit-muster'
+        cookies.append(request.headers.get('cookie'))
+        return httpx.Response(200, text=fixture.read_text())
+
+    browser = MagicMock()
+    client = VintedClient(
+        base_url='https://www.vinted.de',
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        browser_client=browser,
+    )
+
+    assert client.fetch_listing_photo_urls('https://www.vinted.de/items/9491586544-hose-mit-muster') == [
+        'https://images1.vinted.net/t/02_0116a/f800/1785048655.webp',
+        'https://images1.vinted.net/t/01_0236b/f800/1785048655.webp',
+        'https://images1.vinted.net/t/05_00473/f800/1785048655.webp',
+        'https://images1.vinted.net/t/05_00394/f800/1785048655.webp',
+    ]
+    assert cookies == [None]
+    browser.fetch_html.assert_not_called()
+
+
+def test_fetch_listing_photo_urls_reads_photos_beyond_the_rendered_gallery(monkeypatch) -> None:
+    # The page renders five gallery images but its embedded page data lists all 13 photos.
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie='', vinted_region='de'),
+    )
+    fixture = Path(__file__).parent / 'fixtures' / 'vinted' / 'de' / 'item_9866127903.html'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=fixture.read_text())
+
+    client = VintedClient(base_url='https://www.vinted.de', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    urls = client.fetch_listing_photo_urls('https://www.vinted.de/items/9866127903-pantalon-delave')
+
+    assert len(urls) == len(set(urls)) == 13
+    assert urls[0] == (
+        'https://images1.vinted.net/t/01_00f85_tAhZUYvrW1vxRXm9ZBWftMEM/f800/fb0ec561.webp'
+        '?s=9fbf2c4fd22444b0bfc9d3ea39f27fb9a71bc5f6'
+    )
+    assert urls[-1] == (
+        'https://images1.vinted.net/t/02_005a7_MFW4rNrrnaKgJQqs2RcfWVUi/f800/4f774ea9.webp'
+        '?s=608da5e688c175064bb6febb82c96cac93d54dc0'
+    )
