@@ -823,11 +823,13 @@ class TasteService:
         limit: int = 5,
     ) -> tuple[list[LabeledExample], list[LabeledExample]]:
         with session_scope() as session:
-            samples = session.scalars(
-                select(TasteSampleState).order_by(TasteSampleState.updated_at.desc()).limit(limit * 8)
-            ).all()
+            query = select(TasteSampleState).order_by(TasteSampleState.updated_at.desc())
             if clothing_item is not None:
-                samples = sorted(samples, key=lambda sample: sample.clothing_item != clothing_item)
+                # Other buckets' anchors mislead the judge (patterned cardigans as "disliked"
+                # examples for trousers); the judge falls back to the item profile's synthetic
+                # examples when this bucket has none.
+                query = query.where(TasteSampleState.clothing_item == clothing_item)
+            samples = session.scalars(query).all()
             liked: list[LabeledExample] = []
             disliked: list[LabeledExample] = []
             for sample in samples:

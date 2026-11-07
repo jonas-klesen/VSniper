@@ -307,3 +307,36 @@ def test_matching_recompute_job_persists_result(monkeypatch, tmp_path) -> None:
         snapshot = session.query(LearningSnapshotState).one()
         assert snapshot.old_taste_profile is None
         assert snapshot.new_taste_profile["summary"] == "s"
+
+
+def test_labeled_anchors_come_only_from_the_judged_clothing_item(monkeypatch, tmp_path) -> None:
+    """Production 2026-11-07: anchors were picked from the 40 most recently updated samples and
+    padded with other buckets, so the trousers judge saw five disliked patterned cardigans and the
+    hat judge saw jackets as liked examples. Anchors must come from the judged bucket only, even
+    when its samples are older than many samples of other buckets."""
+    service = _setup(monkeypatch, tmp_path)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def sample(sample_id: str, kind: str, clothing_item: str, minute: int) -> TasteSampleState:
+        stamp = base.replace(minute=minute)
+        return TasteSampleState(
+            id=sample_id,
+            kind=kind,
+            clothing_item=clothing_item,
+            title=sample_id,
+            created_at=stamp,
+            updated_at=stamp,
+        )
+
+    with service._test_factory() as session:
+        session.add(sample("old-hat-like", "offer_like", "kopf", 0))
+        session.add(sample("old-hat-dislike", "offer_dislike", "kopf", 1))
+        for index in range(50):
+            kind = "offer_like" if index % 2 else "offer_dislike"
+            session.add(sample(f"knit-{index}", kind, "obenrum_kalt", 2 + index))
+        session.commit()
+
+    liked, disliked = service.latest_labeled_anchors(clothing_item="kopf", limit=5)
+
+    assert [anchor.title for anchor in liked] == ["old-hat-like"]
+    assert [anchor.title for anchor in disliked] == ["old-hat-dislike"]
