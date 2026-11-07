@@ -363,7 +363,6 @@ export type SettingsSnapshot = {
   learn_model_id: string | null;
   observation_model_id: string | null;
   models: AiModelConfig[];
-  vlm_pack_multiple_listing_images: boolean;
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;
   alert_threshold: number;

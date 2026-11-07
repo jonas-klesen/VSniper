@@ -32,7 +32,6 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   judge_fallback_model_id: null,
   learn_model_id: null,
   observation_model_id: null,
-  vlm_pack_multiple_listing_images: true,
   vlm_judge_parallel_requests: 1,
   ai_judge_image_max_px: 512,
 };
@@ -76,7 +75,6 @@ export function AiModelsPage() {
       judge_fallback_model_id: settingsQuery.data.judge_fallback_model_id,
       learn_model_id: settingsQuery.data.learn_model_id,
       observation_model_id: settingsQuery.data.observation_model_id,
-      vlm_pack_multiple_listing_images: settingsQuery.data.vlm_pack_multiple_listing_images,
       vlm_judge_parallel_requests: settingsQuery.data.vlm_judge_parallel_requests,
       ai_judge_image_max_px: settingsQuery.data.ai_judge_image_max_px,
     });
@@ -288,7 +286,6 @@ export function AiModelsPage() {
           <section className="settings-subsection">
             <div>
               <h4>Judge invocation</h4>
-              <p className="muted">Controls how listing photos are packed and sent to the judge model.</p>
             </div>
             <div className="form-grid">
               <label>
@@ -312,17 +309,6 @@ export function AiModelsPage() {
                 />
               </label>
             </div>
-            <label className="checkbox-label settings-checkbox-card" style={{ marginTop: '1rem' }}>
-              <input
-                type="checkbox"
-                checked={aiSettings.vlm_pack_multiple_listing_images}
-                onChange={(e) => setAiSetting('vlm_pack_multiple_listing_images', e.target.checked)}
-              />
-              <span>
-                Pack multiple listing photos
-                <small>Use up to four photos inside each candidate tile while keeping the tile size fixed.</small>
-              </span>
-            </label>
           </section>
         </div>
         <div className="button-row" style={{ marginTop: '1rem' }}>

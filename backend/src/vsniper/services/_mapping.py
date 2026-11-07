@@ -336,11 +336,6 @@ def settings_to_contract(model: AppSettingsState, session: Session) -> SettingsS
                 )
                 for row in model_rows
             ],
-            "vlm_pack_multiple_listing_images": (
-                True
-                if getattr(model, "vlm_pack_multiple_listing_images", True) is None
-                else model.vlm_pack_multiple_listing_images
-            ),
             "vlm_judge_parallel_requests": model.vlm_judge_parallel_requests,
             "ai_judge_image_max_px": model.ai_judge_image_max_px,
             "alert_threshold": _coerce_alert_threshold(getattr(model, "alert_threshold", 95)),

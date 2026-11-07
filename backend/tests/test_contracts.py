@@ -56,15 +56,6 @@ def test_settings_update_accepts_single_parallel_request() -> None:
     assert SettingsUpdate.model_validate(payload).vlm_judge_parallel_requests == 1
 
 
-def test_settings_update_accepts_multi_image_tile_toggle() -> None:
-    payload = {
-        "vinted_region": "de",
-        "vlm_pack_multiple_listing_images": False,
-    }
-
-    assert SettingsUpdate.model_validate(payload).vlm_pack_multiple_listing_images is False
-
-
 def test_settings_update_rejects_invalid_alert_threshold() -> None:
     payload = {
         "vinted_region": "de",
@@ -141,7 +132,6 @@ def test_settings_snapshot_splits_local_judge_from_openai_learning(monkeypatch) 
             judge_fallback_model_id=None,
             learn_model_id=None,
             observation_model_id=None,
-            vlm_pack_multiple_listing_images=True,
             vlm_judge_parallel_requests=1,
             ai_judge_image_max_px=512,
             alert_threshold=95,

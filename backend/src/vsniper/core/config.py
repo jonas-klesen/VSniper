@@ -61,7 +61,6 @@ class Settings(BaseSettings):
     ai_observation_provider: str = Field(default="local", alias="AI_OBSERVATION_PROVIDER")
     local_observation_model: str = Field(default="lfm25-vl-clothing", alias="LOCAL_OBSERVATION_MODEL")
     ai_learn_observation_batch_size: int = Field(default=15, alias="AI_LEARN_OBSERVATION_BATCH_SIZE")
-    vlm_pack_multiple_listing_images: bool = Field(default=True, alias="VLM_PACK_MULTIPLE_LISTING_IMAGES")
     vlm_judge_parallel_requests: int = Field(default=1, alias="VLM_JUDGE_PARALLEL_REQUESTS")
     ai_api_key: str = Field(default="put-your-ai-key-here", alias="AI_API_KEY")
     upload_dir: Path = Field(default=Path("storage/uploads"), alias="UPLOAD_DIR")

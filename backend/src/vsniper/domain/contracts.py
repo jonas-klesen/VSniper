@@ -413,7 +413,6 @@ class SettingsSnapshot(BaseModel):
     learn_model_id: str | None = None
     observation_model_id: str | None = None
     models: list[AiModelConfig] = Field(default_factory=list)
-    vlm_pack_multiple_listing_images: bool = True
     vlm_judge_parallel_requests: int = 1
     ai_judge_image_max_px: int = 512
     alert_threshold: int = 95
@@ -689,7 +688,6 @@ class SettingsUpdate(BaseModel):
     judge_fallback_model_id: str | None = None
     learn_model_id: str | None = None
     observation_model_id: str | None = None
-    vlm_pack_multiple_listing_images: bool | None = None
     vlm_judge_parallel_requests: int | None = None
     ai_judge_image_max_px: int | None = None
     alert_threshold: int | None = None

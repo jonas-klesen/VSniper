@@ -115,7 +115,6 @@ def _db_settings(
     ai_judge_allow_openai_fallback: bool = False,
     ai_judge_fallback_provider: str | None = None,
     cerebras_judge_model: str = "gemma-4-31b",
-    vlm_pack_multiple_listing_images: bool = True,
 ) -> SimpleNamespace:
     """Builds a plain settings namespace plus the registry-resolved judge/fallback models that
     `_judge_candidates`/`_judge_listing` now take as explicit params (post AI-models-registry
@@ -155,7 +154,6 @@ def _db_settings(
 
     return SimpleNamespace(
         vlm_judge_parallel_requests=vlm_judge_parallel_requests,
-        vlm_pack_multiple_listing_images=vlm_pack_multiple_listing_images,
         ai_judge_image_max_px=512,
         judge_model=judge_model,
         judge_fallback_model=judge_fallback_model,
@@ -213,30 +211,6 @@ def _raw(external_id: str, title: str = "A listing", brand: str = "Brand") -> di
         "features": [],
         "raw_listing": {},
     }
-
-
-def test_multi_image_setting_controls_downloaded_listing_url_count() -> None:
-    service = _make_service()
-    search = _search()
-    taste = TasteProfile(summary="", taste_prompt="likes vintage")
-    raw = _raw("item-1")
-    raw["image_urls"] = [f"https://images.vinted.de/item-1-{index}.jpg" for index in range(6)]
-    seen_counts: list[int] = []
-    jpeg = _jpeg()
-
-    def _judge(*, candidate: CandidateImageInput, **kwargs) -> CandidateJudgment:
-        return CandidateJudgment(score=80, explanation="ok", labels=[], concerns=[])
-
-    def _download(*, candidate_id: str, image_urls: list[str]) -> CandidateImageInput:
-        seen_counts.append(len(image_urls))
-        return CandidateImageInput(candidate_id=candidate_id, image_bytes=jpeg)
-
-    service.taste_client.judge_candidate.side_effect = _judge
-    with patch.object(service, "_download_candidate_image", side_effect=_download):
-        _call_judge(service, [raw], search, taste, _db_settings(vlm_pack_multiple_listing_images=False))
-        _call_judge(service, [raw], search, taste, _db_settings(vlm_pack_multiple_listing_images=True))
-
-    assert seen_counts == [1, 4]
 
 
 def test_all_candidates_are_judged() -> None:

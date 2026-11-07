@@ -25,7 +25,6 @@ from vsniper.integrations.openai.client import (
     REFERENCE_OBSERVATIONS_MAX_OUTPUT_TOKENS,
     TASTE_PROFILE_SCHEMA,
     TASTE_PROFILE_MAX_OUTPUT_TOKENS,
-    build_listing_image,
     clean_listing_description,
 )
 from vsniper.integrations.vinted.categories import default_category_filter_for_clothing_item
@@ -90,23 +89,6 @@ def test_taste_profile_schema_omits_regex_terms() -> None:
     item_properties = TASTE_PROFILE_SCHEMA["properties"]["item_profiles"]["items"]["properties"]
     assert "positive_regex_terms" not in item_properties
     assert "negative_regex_terms" not in item_properties
-
-
-def test_listing_image_packs_multiple_listing_photos_without_resizing() -> None:
-    single = build_listing_image(CandidateImageInput(candidate_id="a", image_bytes=_jpeg_bytes("red")), tile_size=128)
-    packed = build_listing_image(
-        CandidateImageInput(
-            candidate_id="a",
-            image_bytes=_jpeg_bytes("red"),
-            extra_image_bytes=[_jpeg_bytes("blue"), _jpeg_bytes("green"), _jpeg_bytes("yellow")],
-        ),
-        tile_size=128,
-    )
-
-    with Image.open(BytesIO(single)) as single_image, Image.open(BytesIO(packed)) as packed_image:
-        assert single_image.size == packed_image.size == (128, 128)
-        # Packed photos fill the quadrants of the same square.
-        assert packed_image.getpixel((100, 20))[2] > 150
 
 
 def test_model_access_test_local_provider_posts_to_configured_responses_endpoint() -> None:
@@ -578,33 +560,6 @@ def test_local_judgment_sends_search_constant_context_as_leading_message() -> No
     assert listing_text.startswith("Disliked anchors")
     assert "<candidate_metadata>" in listing_text
     assert context_text + listing_text == openai_prompt
-
-
-def test_judgment_mentions_packed_photos_only_when_a_listing_has_several() -> None:
-    prompts: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.read().decode("utf-8"))
-        prompts.append(payload["input"][0]["content"][0]["text"])
-        text = '{"score":8,"explanation":"Strong color.","labels":["color"],"concerns":[]}'
-        return httpx.Response(
-            200, json={"output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}]}
-        )
-
-    client = _mock_openai_client(handler)
-    several = CandidateImageInput(candidate_id="a", image_bytes=_jpeg_bytes("red"), extra_image_bytes=[_jpeg_bytes("blue")])
-    single = CandidateImageInput(candidate_id="b", image_bytes=_jpeg_bytes("red"))
-    for candidate, pack in ((several, False), (several, True), (single, True)):
-        client.judge_candidate(
-            taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
-            candidate=candidate,
-            model="gpt-5.4-mini",
-            reasoning_effort="low",
-            ai_judge_provider="openai",
-            pack_multiple_listing_images=pack,
-        )
-
-    assert ["up to four photos of the same listing" in prompt for prompt in prompts] == [False, True, False]
 
 
 def test_local_judgment_accepts_loose_bullets() -> None:

@@ -176,7 +176,6 @@ class AppSettingsState(Base):
     judge_fallback_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     learn_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     observation_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    vlm_pack_multiple_listing_images: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     vlm_judge_parallel_requests: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     ai_judge_image_max_px: Mapped[int] = mapped_column(Integer, default=512, nullable=False)
     alert_threshold: Mapped[int] = mapped_column(Integer, default=95, nullable=False)

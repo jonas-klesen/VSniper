@@ -46,7 +46,6 @@ type SettingsUpdatePayload = {
   judge_fallback_model_id: string | null;
   learn_model_id: string | null;
   observation_model_id: string | null;
-  vlm_pack_multiple_listing_images: boolean;
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;
   alert_threshold: number;
@@ -59,7 +58,6 @@ export type SettingsSavePayload = Omit<
   | 'judge_fallback_model_id'
   | 'learn_model_id'
   | 'observation_model_id'
-  | 'vlm_pack_multiple_listing_images'
   | 'vlm_judge_parallel_requests'
   | 'ai_judge_image_max_px'
 >;
@@ -74,7 +72,6 @@ export type AiModelSettingsSavePayload = Pick<
   | 'judge_fallback_model_id'
   | 'learn_model_id'
   | 'observation_model_id'
-  | 'vlm_pack_multiple_listing_images'
   | 'vlm_judge_parallel_requests'
   | 'ai_judge_image_max_px'
 >;

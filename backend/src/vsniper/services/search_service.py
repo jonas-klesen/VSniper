@@ -683,7 +683,6 @@ class SearchService:
 
         if selected:
             _evict_stale_cache(self.settings.resolve_path(self.settings.cache_dir) / "candidate-images")
-            max_listing_images = 4 if getattr(db_settings, "vlm_pack_multiple_listing_images", True) else 1
             download_failed_ids: list[str] = []
             with ThreadPoolExecutor(max_workers=min(len(selected), 8)) as pool:
                 futures_in_order = [
@@ -691,7 +690,7 @@ class SearchService:
                         pool.submit(
                             self._download_candidate_image,
                             candidate_id=cid,
-                            image_urls=(raw.get("image_urls", []) or [])[:max_listing_images],
+                            image_urls=(raw.get("image_urls", []) or [])[:1],
                         ),
                         cid,
                         raw,
@@ -745,7 +744,6 @@ class SearchService:
                             judge_fallback_model=judge_fallback_model,
                             judge_image_detail=self.settings.ai_judge_image_detail,
                             image_max_px=db_settings.ai_judge_image_max_px,
-                            pack_multiple_listing_images=getattr(db_settings, "vlm_pack_multiple_listing_images", True),
                             on_usage=on_usage,
                             alert_threshold=search_record.effective_alert_threshold,
                         )
@@ -775,7 +773,6 @@ class SearchService:
         judge_fallback_model: ResolvedAiModel | None,
         judge_image_detail: str,
         image_max_px: int = 512,
-        pack_multiple_listing_images: bool = True,
         on_usage: UsageCallback | None = None,
         alert_threshold: int = 95,
     ) -> tuple[str, ScoreTrace, str]:
@@ -805,7 +802,6 @@ class SearchService:
                 ai_judge_provider=model.provider,
                 local_vlm_base_url=model.local_base_url,
                 image_max_px=image_max_px,
-                pack_multiple_listing_images=pack_multiple_listing_images,
                 on_usage=on_usage,
             )
 
@@ -1473,8 +1469,6 @@ class SearchService:
                 model.learn_model_id = payload.learn_model_id or None
             if payload.observation_model_id is not None:
                 model.observation_model_id = payload.observation_model_id or None
-            if payload.vlm_pack_multiple_listing_images is not None:
-                model.vlm_pack_multiple_listing_images = payload.vlm_pack_multiple_listing_images
             if payload.vlm_judge_parallel_requests is not None:
                 model.vlm_judge_parallel_requests = _judge_request_concurrency(payload.vlm_judge_parallel_requests)
             if payload.ai_judge_image_max_px is not None:
