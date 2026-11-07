@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import mimetypes
 import re
 from collections.abc import Callable
@@ -226,6 +227,8 @@ JUDGMENT_SCHEMA: dict[str, Any] = {
         "concerns": STRING_ARRAY_SCHEMA,
     },
 }
+# Top alternatives read at each score token of a local judgment.
+LOCAL_SCORE_TOP_LOGPROBS = 20
 
 GRID_JUDGMENT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -534,6 +537,41 @@ def _to_chat_completion_content(content: list[dict[str, Any]]) -> list[dict[str,
         else:
             converted.append(part)
     return converted
+
+
+_SCORE_KEY_TOKEN = re.compile(r'\s*"?score"?\s*')
+_SCORE_VALUE_TOKEN = re.compile(r"\s?(100|[1-9][0-9]?)")
+
+
+def _expected_scores(logprob_tokens: list[dict[str, Any]]) -> list[float]:
+    """Probability-weighted value of every `"score": <n>` in a local judgment, in output order.
+
+    A small judge spreads its belief over several rubric band edges (e.g. 81, 20, 61), and
+    near-greedy sampling collapses that onto the single most likely edge for most listings. The
+    expected value keeps the model's uncertainty, which ranks listings far better. Each value
+    1-100 is a single LFM3 token, so the score token's top alternatives hold the distribution.
+    """
+    scores: list[float] = []
+    awaiting_value = False
+    for index, token in enumerate(logprob_tokens):
+        text = str(token.get("token") or "")
+        if not awaiting_value:
+            following = str(logprob_tokens[index + 1].get("token") or "") if index + 1 < len(logprob_tokens) else ""
+            # A key token, not the word "score" inside an explanation string.
+            awaiting_value = bool(_SCORE_KEY_TOKEN.fullmatch(text)) and following.startswith('":')
+            continue
+        if not _SCORE_VALUE_TOKEN.fullmatch(text):
+            continue
+        weights: dict[int, float] = {}
+        for alternative in token.get("top_logprobs") or []:
+            match = _SCORE_VALUE_TOKEN.fullmatch(str(alternative.get("token") or ""))
+            if match:
+                value = int(match.group(1))
+                weights[value] = weights.get(value, 0.0) + math.exp(float(alternative.get("logprob", -math.inf)))
+        total = sum(weights.values())
+        scores.append(sum(value * weight for value, weight in weights.items()) / total if total else float(text))
+        awaiting_value = False
+    return scores
 
 
 def _split_loose_list(value: str) -> list[str]:
@@ -1173,6 +1211,39 @@ class OpenAITasteClient:
             schema_name=schema_name,
             model=model,
             provider_label="OpenRouter",
+        )
+
+    def _create_local_chat_completion(
+        self,
+        *,
+        model: str,
+        context_text: str,
+        content: list[dict[str, Any]],
+        max_output_tokens: int,
+        schema_name: str,
+        schema: dict[str, Any],
+        base_url: str,
+    ) -> dict[str, Any]:
+        """llama.cpp chat completion with score-token logprobs (its Responses endpoint returns none)."""
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                # A separate leading message gives llama.cpp a reusable prefix-cache checkpoint.
+                {"role": "user", "content": [{"type": "text", "text": context_text}]},
+                {"role": "user", "content": _to_chat_completion_content(content)},
+            ],
+            "max_tokens": max_output_tokens,
+            "response_format": {"type": "json_schema", "json_schema": {"name": schema_name, "schema": schema}},
+            "logprobs": True,
+            "top_logprobs": LOCAL_SCORE_TOP_LOGPROBS,
+        }
+        return self._post_chat_completion(
+            base_url=base_url,
+            headers=self._headers,
+            payload=payload,
+            schema_name=schema_name,
+            model=model,
+            provider_label="Local",
         )
 
     def test_model(
@@ -1879,18 +1950,24 @@ class OpenAITasteClient:
                     schema=schema,
                     reasoning_effort=effort,
                 )
-            else:
-                is_local = provider == "local"
-                payload = self._create_response(
+            elif provider == "local":
+                payload = self._create_local_chat_completion(
                     model=model_name,
-                    reasoning_effort="" if is_local else effort,
-                    content=local_content if is_local else content,
+                    context_text=prompt_context,
+                    content=local_content,
                     max_output_tokens=grid_max_output_tokens,
                     schema_name="grid_judgments",
                     schema=schema,
-                    base_url=base_url if is_local else OPENAI_API_BASE_URL,
-                    schema_mode="llama_json_schema" if is_local else "openai_responses",
-                    context_text=prompt_context if is_local else None,
+                    base_url=base_url,
+                )
+            else:
+                payload = self._create_response(
+                    model=model_name,
+                    reasoning_effort=effort,
+                    content=content,
+                    max_output_tokens=grid_max_output_tokens,
+                    schema_name="grid_judgments",
+                    schema=schema,
                 )
             # Emit usage before parsing so billed-but-unparseable responses still surface in cost stats.
             self._emit_usage("judge_grid", model_name, payload, on_usage=on_usage)
@@ -1908,18 +1985,24 @@ class OpenAITasteClient:
                 raise _retryable_error(
                     f"OpenRouter grid judgment truncated; retrying with {grid_max_output_tokens} output tokens."
                 )
-            try:
-                if provider == "cerebras":
-                    return _parse_json_text(_extract_chat_completion_text(payload, "Cerebras"))
-                if provider == "openrouter":
-                    return _parse_json_text(_extract_chat_completion_text(payload, "OpenRouter"))
-                return _parse_json_output(payload)
-            except OpenAIIntegrationError:
-                if provider != "local":
-                    raise
-                return _parse_loose_grid_output(_extract_output_text(payload), expected_positions)
+            if provider == "local":
+                text = _extract_chat_completion_text(payload, "Local")
+                choice = payload["choices"][0]
+                expected = _expected_scores(((choice.get("logprobs") or {}).get("content")) or [])
+                try:
+                    return _parse_json_text(text), expected
+                except OpenAIIntegrationError:
+                    return _parse_loose_grid_output(text, expected_positions), expected
+            if provider == "cerebras":
+                return _parse_json_text(_extract_chat_completion_text(payload, "Cerebras")), []
+            if provider == "openrouter":
+                return _parse_json_text(_extract_chat_completion_text(payload, "OpenRouter")), []
+            return _parse_json_output(payload), []
 
-        parsed_payload = retry_transient(_request_and_parse, label="OpenAI grid judgment")
+        parsed_payload, expected_scores = retry_transient(_request_and_parse, label="OpenAI grid judgment")
+        # Expected scores line up with positions only when every position produced one score.
+        if len(expected_scores) != len(expected_positions):
+            expected_scores = []
         try:
             parsed = _GridJudgmentPayload.model_validate(_normalize_grid_keys(parsed_payload))
         except ValidationError as exc:
@@ -1934,9 +2017,12 @@ class OpenAITasteClient:
             raw_judgment = getattr(parsed, position)
             if raw_judgment is None:
                 continue
+            score = raw_judgment.score
+            if expected_scores:
+                score = max(1, min(100, round(expected_scores[index])))
             judgments[candidate.candidate_id] = CandidateJudgment(
                 position=position,
-                score=raw_judgment.score,
+                score=score,
                 explanation=raw_judgment.explanation,
                 labels=raw_judgment.labels,
                 concerns=raw_judgment.concerns,

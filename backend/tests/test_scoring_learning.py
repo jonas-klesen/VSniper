@@ -403,43 +403,27 @@ def test_cerebras_grid_judgment_uses_chat_completions_image_url_and_schema() -> 
     assert usage == [("judge_grid", "gemma-4-31b", 17, 9, 0)]
 
 
-def test_local_responses_grid_judgment_uses_configured_base_url_and_parses_fenced_json() -> None:
+def test_local_grid_judgment_uses_configured_base_url_and_parses_fenced_json() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "http://local-vlm.test/v1/responses"
+        assert str(request.url) == "http://local-vlm.test/v1/chat/completions"
         payload = json.loads(request.read().decode("utf-8"))
-        prompt_text = payload["input"][-1]["content"][0]["text"]
-        assert "labeled 1x1, 2x2, or 3x3 grid" in prompt_text
+        prompt_text = payload["messages"][-1]["content"][0]["text"]
         assert "up to four photos of the same listing" not in prompt_text
         assert payload["model"] == "gemma4-12b-quality"
         assert "reasoning" not in payload
-        assert "text" not in payload
-        assert payload["json_schema"]["required"] == ["top_left"]
-        assert payload["json_schema"]["properties"]["top_left"]["required"] == [
-            "score",
-            "explanation",
-            "labels",
-            "concerns",
-        ]
-        assert payload["input"][-1]["content"][1]["type"] == "input_image"
+        schema = payload["response_format"]["json_schema"]["schema"]
+        assert schema["required"] == ["top_left"]
+        assert payload["messages"][-1]["content"][1]["type"] == "image_url"
+        content = (
+            '```json\n{"TOP-LEFT":{"score":8,"explanation":"Bold color fits.",'
+            '"labels":["Bold color"],"concerns":[]},"top_right":null,'
+            '"bottom_left":null,"bottom_right":null}\n```'
+        )
         return httpx.Response(
             200,
             json={
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": (
-                                    '```json\n{"TOP-LEFT":{"score":8,"explanation":"Bold color fits.",'
-                                    '"labels":["Bold color"],"concerns":[]},"top_right":null,'
-                                    '"bottom_left":null,"bottom_right":null}\n```'
-                                ),
-                            }
-                        ],
-                    }
-                ],
-                "usage": {"input_tokens": 11, "output_tokens": 7},
+                "choices": [{"finish_reason": "stop", "message": {"content": content}}],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 7},
             },
         )
 
@@ -459,6 +443,144 @@ def test_local_responses_grid_judgment_uses_configured_base_url_and_parses_fence
     assert usage == [("judge_grid", "gemma4-12b-quality", 11, 7, 0)]
 
 
+def _logprob_token(text: str, alternatives: dict[str, float] | None = None) -> dict:
+    alternatives = alternatives or {text: 1.0}
+    import math
+
+    return {
+        "token": text,
+        "logprob": math.log(alternatives.get(text, 1.0)),
+        "top_logprobs": [{"token": token, "logprob": math.log(p)} for token, p in alternatives.items()],
+    }
+
+
+def _local_chat_response(content: str, tokens: list[dict]) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": content},
+                    "logprobs": {"content": tokens},
+                }
+            ],
+            "usage": {"prompt_tokens": 30, "completion_tokens": 9, "prompt_tokens_details": {"cached_tokens": 12}},
+        },
+    )
+
+
+def test_local_grid_judgment_scores_with_probability_weighted_score_token() -> None:
+    """Production 2026-11-07: LFM3 put ~20% on "81" and spread the rest over other rubric band
+    edges, so the near-greedy sampled score turned 58% of all listings into exactly 81. The local
+    judge now reads the score token's top logprobs and uses the expected score instead."""
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "http://local-vlm.test/v1/chat/completions"
+        payload = json.loads(request.read().decode("utf-8"))
+        requests.append(payload)
+        content = '{"top_left": {"explanation": "Muted cargo.", "labels": [], "concerns": ["muted"], "score": 81}}'
+        tokens = [
+            _logprob_token('{"top_left": {"explanation": "Muted cargo.", "labels": [], "concerns": ["muted"], "'),
+            _logprob_token("score"),
+            _logprob_token('":'),
+            _logprob_token(" "),
+            # Non-numeric alternatives are ignored and the numeric mass is renormalised.
+            _logprob_token("81", {"81": 0.4, "20": 0.2, "41": 0.2, "abc": 0.2}),
+            _logprob_token("}}"),
+        ]
+        return _local_chat_response(content, tokens)
+
+    usage: list[tuple] = []
+    client = _mock_openai_client(handler)
+    result = client.judge_candidate_grid(
+        taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+        candidates=[CandidateImageInput(candidate_id="candidate-a", image_bytes=_jpeg_bytes("red"), title="Cargo")],
+        model="local-model",
+        reasoning_effort="low",
+        ai_judge_provider="local",
+        local_vlm_base_url="http://local-vlm.test/v1",
+        on_usage=lambda *args: usage.append(args),
+    )
+
+    payload = requests[0]
+    assert payload["model"] == "local-model"
+    assert payload["logprobs"] is True
+    assert payload["top_logprobs"] >= 10
+    assert payload["response_format"]["type"] == "json_schema"
+    context_message, listing_message = payload["messages"]
+    assert context_message["role"] == listing_message["role"] == "user"
+    assert [part["type"] for part in context_message["content"]] == ["text"]
+    assert [part["type"] for part in listing_message["content"]] == ["text", "image_url"]
+    assert "Cargo" not in context_message["content"][0]["text"]
+
+    # (0.4 * 81 + 0.2 * 20 + 0.2 * 41) / 0.8 = 55.75
+    assert result.judgments["candidate-a"].score == 56
+    assert result.judgments["candidate-a"].concerns == ["muted"]
+    assert usage == [("judge_grid", "local-model", 30, 9, 12)]
+
+
+def test_local_grid_judgment_weights_each_position_by_its_own_score_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = (
+            '{"top_left": {"explanation": "a", "labels": [], "concerns": [], "score": 81}, '
+            '"top_right": {"explanation": "score high", "labels": [], "concerns": [], "score": 20}}'
+        )
+        tokens = [
+            _logprob_token('{"top_left": {"explanation": "a", "labels": [], "concerns": [], "'),
+            _logprob_token("score"),
+            _logprob_token('":'),
+            _logprob_token(" "),
+            _logprob_token("81", {"81": 0.5, "61": 0.5}),
+            _logprob_token('}, "top_right": {"explanation": "'),
+            # The word "score" inside an explanation is not a score key.
+            _logprob_token("score"),
+            _logprob_token(" high"),
+            _logprob_token('", "labels": [], "concerns": [], "'),
+            _logprob_token("score"),
+            _logprob_token('":'),
+            _logprob_token(" "),
+            _logprob_token("20", {"20": 0.75, "1": 0.25}),
+            _logprob_token("}}"),
+        ]
+        return _local_chat_response(content, tokens)
+
+    client = _mock_openai_client(handler)
+    result = client.judge_candidate_grid(
+        taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+        candidates=[
+            CandidateImageInput(candidate_id="candidate-a", image_bytes=_jpeg_bytes("red")),
+            CandidateImageInput(candidate_id="candidate-b", image_bytes=_jpeg_bytes("blue")),
+        ],
+        model="local-model",
+        reasoning_effort="low",
+        ai_judge_provider="local",
+        local_vlm_base_url="http://local-vlm.test/v1",
+    )
+
+    assert result.judgments["candidate-a"].score == 71
+    assert result.judgments["candidate-b"].score == 15
+
+
+def test_local_grid_judgment_keeps_sampled_score_without_logprobs() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = '{"top_left": {"explanation": "Fits.", "labels": [], "concerns": [], "score": 64}}'
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": content}}]})
+
+    client = _mock_openai_client(handler)
+    result = client.judge_candidate_grid(
+        taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+        candidates=[CandidateImageInput(candidate_id="candidate-a", image_bytes=_jpeg_bytes("red"))],
+        model="local-model",
+        reasoning_effort="low",
+        ai_judge_provider="local",
+        local_vlm_base_url="http://local-vlm.test/v1",
+    )
+
+    assert result.judgments["candidate-a"].score == 64
+
+
 def test_local_grid_judgment_sends_search_constant_context_as_leading_message() -> None:
     """llama.cpp only reuses a cached prompt prefix for LFM3 from a checkpoint at a user-message
     start that lies >= 256 tokens before the first differing token. The local request therefore
@@ -468,7 +590,11 @@ def test_local_grid_judgment_sends_search_constant_context_as_leading_message() 
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.read().decode("utf-8"))
-        requests["local" if "json_schema" in payload else "openai"] = payload
+        if request.url.path.endswith("/chat/completions"):
+            requests["local"] = payload
+            content = '{"top_left":{"score":8,"explanation":"Fits.","labels":[],"concerns":[]}}'
+            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": content}}]})
+        requests["openai"] = payload
         return httpx.Response(
             200,
             json={
@@ -501,10 +627,10 @@ def test_local_grid_judgment_sends_search_constant_context_as_leading_message() 
     assert len(openai_input) == 1
     openai_prompt = openai_input[0]["content"][0]["text"]
 
-    context_message, listing_message = requests["local"]["input"]
+    context_message, listing_message = requests["local"]["messages"]
     assert context_message["role"] == listing_message["role"] == "user"
-    assert [part["type"] for part in context_message["content"]] == ["input_text"]
-    assert [part["type"] for part in listing_message["content"]] == ["input_text", "input_image"]
+    assert [part["type"] for part in context_message["content"]] == ["text"]
+    assert [part["type"] for part in listing_message["content"]] == ["text", "image_url"]
 
     context_text = context_message["content"][0]["text"]
     listing_text = listing_message["content"][0]["text"]
@@ -578,30 +704,16 @@ def test_grid_judgment_only_mentions_multi_image_tiles_when_enabled_for_multi_ti
     assert "Thick borders separate different listing tiles" in prompts[1]
 
 
-def test_local_responses_grid_judgment_accepts_loose_quadrant_bullets() -> None:
+def test_local_grid_judgment_accepts_loose_quadrant_bullets() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": (
-                                    "### Quadrant: TOP-LEFT\n"
-                                    "- score: 10\n"
-                                    "- explanation: Saturated red vintage cues fit strongly.\n"
-                                    "- labels: saturated red, vintage\n"
-                                    "- concerns: none"
-                                ),
-                            }
-                        ],
-                    }
-                ]
-            },
+        content = (
+            "### Quadrant: TOP-LEFT\n"
+            "- score: 10\n"
+            "- explanation: Saturated red vintage cues fit strongly.\n"
+            "- labels: saturated red, vintage\n"
+            "- concerns: none"
         )
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": content}}]})
 
     client = _mock_openai_client(handler)
     result = client.judge_candidate_grid(
@@ -1283,21 +1395,12 @@ def test_grid_judgment_tolerates_null_usage_fields() -> None:
     # A local model may emit an explicit "input_tokens": null; int(None) would crash _emit_usage
     # and discard an already-billed response. Null/missing fields must coerce to 0.
     def handler(request: httpx.Request) -> httpx.Response:
+        content = '{"top_left":{"score":8,"explanation":"ok","labels":[],"concerns":[]}}'
         return httpx.Response(
             200,
             json={
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": '{"top_left":{"score":8,"explanation":"ok","labels":[],"concerns":[]}}',
-                            }
-                        ],
-                    }
-                ],
-                "usage": {"input_tokens": None, "output_tokens": None},
+                "choices": [{"finish_reason": "stop", "message": {"content": content}}],
+                "usage": {"prompt_tokens": None, "completion_tokens": None},
             },
         )
 
