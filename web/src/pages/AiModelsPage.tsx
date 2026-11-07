@@ -33,8 +33,8 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   learn_model_id: null,
   observation_model_id: null,
   vlm_judge_parallel_requests: 1,
-  ai_judge_image_max_px: 512,
-  ai_judge_max_photos: 6,
+  ai_judge_image_max_px: 768,
+  ai_judge_max_photos: 1,
 };
 
 function parsePositiveNumber(value: string, fallback: number): number {

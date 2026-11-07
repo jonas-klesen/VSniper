@@ -15,7 +15,10 @@ TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note
 ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
 
 # Photos of one listing sent to the judge, each as its own image input. Vinted allows 20 per listing.
-JUDGE_MAX_PHOTOS = 6
+# The local 2B judge ranks best from the main photo alone: each extra photo compresses its scores.
+JUDGE_MAX_PHOTOS = 1
+# Longest side of each judge photo. Vinted serves 600x800 photos, so 768 keeps nearly full detail.
+JUDGE_IMAGE_MAX_PX = 768
 JUDGE_MAX_PHOTOS_LIMIT = 20
 
 # Keyword groups per saved search. Vinted returns only listings matching every word of a query,
@@ -442,7 +445,7 @@ class SettingsSnapshot(BaseModel):
     observation_model_id: str | None = None
     models: list[AiModelConfig] = Field(default_factory=list)
     vlm_judge_parallel_requests: int = 1
-    ai_judge_image_max_px: int = 512
+    ai_judge_image_max_px: int = JUDGE_IMAGE_MAX_PX
     ai_judge_max_photos: int = JUDGE_MAX_PHOTOS
     alert_threshold: int = 95
     scan_interval_seconds: int = 1800

@@ -22,7 +22,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     with op.batch_alter_table('app_settings', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('ai_judge_max_photos', sa.Integer(), nullable=False, server_default='6'))
+        batch_op.add_column(sa.Column('ai_judge_max_photos', sa.Integer(), nullable=False, server_default='1'))
 
 
 def downgrade() -> None:
