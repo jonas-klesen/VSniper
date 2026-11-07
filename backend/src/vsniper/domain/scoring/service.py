@@ -19,6 +19,30 @@ def _coerce_alert_threshold(value: int | None) -> int:
     return max(1, min(100, int(value)))
 
 
+def _decision_for(score: int, alert_threshold: int) -> Literal["alert", "review", "discard"]:
+    if score >= alert_threshold:
+        return "alert"
+    if score >= SCORE_REVIEW_THRESHOLD:
+        return "review"
+    return "discard"
+
+
+def retarget_judgment_trace(trace: ScoreTrace, *, alert_threshold: int | None) -> ScoreTrace:
+    """Re-derive the decision of a stored judgment for a new alert threshold, keeping its score."""
+    effective_alert_threshold = _coerce_alert_threshold(alert_threshold)
+    decision = _decision_for(trace.score_10, effective_alert_threshold)
+    return trace.model_copy(
+        update={
+            "threshold": round(effective_alert_threshold / 100, 3),
+            "decision": decision,
+            "summary": (
+                f"{trace.score_10}/100; alert threshold={effective_alert_threshold}; decision={decision}. "
+                f"{trace.explanation}"
+            ),
+        }
+    )
+
+
 def build_judgment_trace(
     *,
     judgment: CandidateJudgment,
@@ -28,12 +52,7 @@ def build_judgment_trace(
 ) -> ScoreTrace:
     effective_alert_threshold = _coerce_alert_threshold(alert_threshold)
     normalized = round(judgment.score / 100, 3)
-    if judgment.score >= effective_alert_threshold:
-        decision: Literal["alert", "review", "discard"] = "alert"
-    elif judgment.score >= SCORE_REVIEW_THRESHOLD:
-        decision = "review"
-    else:
-        decision = "discard"
+    decision = _decision_for(judgment.score, effective_alert_threshold)
 
     return ScoreTrace(
         final_score=normalized,

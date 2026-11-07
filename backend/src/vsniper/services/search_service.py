@@ -42,6 +42,7 @@ from vsniper.domain.contracts import (
 from vsniper.domain.scoring.service import (
     build_failed_judgment_trace,
     build_judgment_trace,
+    retarget_judgment_trace,
 )
 from vsniper.integrations.openai.client import (
     CandidateImageInput,
@@ -573,10 +574,10 @@ class SearchService:
         """Return stored VLM judgments still valid for the current taste-profile version.
 
         Reads (no write lock held) candidate rows that were already VLM-judged under this exact
-        profile version, so the scan skips re-downloading and re-judging unchanged listings.
-        build_judgment_trace stamps the profile version and alert threshold into ScoreTrace,
-        which form the equality key. "failed" rows are not reused, so a transient image/VLM
-        failure is retried on the next cycle.
+        profile version, so the scan skips re-downloading and re-judging unchanged listings. The
+        profile version is the equality key; a stored judgment made under another alert threshold
+        keeps its score and gets the decision for the current threshold. "failed" rows are not
+        reused, so a transient image/VLM failure is retried on the next cycle.
         """
         if not candidate_ids:
             return {}
@@ -592,12 +593,14 @@ class SearchService:
                 continue
             if score_trace_json.get("prompt_version") != profile_version:
                 continue
-            if score_trace_json.get("threshold") != round(alert_threshold / 100, 3):
-                continue
             try:
-                reused[candidate_id] = ScoreTrace.model_validate(score_trace_json)
+                trace = ScoreTrace.model_validate(score_trace_json)
             except ValidationError:
                 _logger.warning("could not reuse stored score trace for candidate %s", candidate_id)
+                continue
+            if trace.threshold != round(alert_threshold / 100, 3):
+                trace = retarget_judgment_trace(trace, alert_threshold=alert_threshold)
+            reused[candidate_id] = trace
         return reused
 
     def _judge_candidates(

@@ -312,7 +312,10 @@ def test_already_judged_candidate_is_reused_not_rejudged(memo_db) -> None:
     assert download.call_args.kwargs["candidate_id"] == "search-001:item-2"
 
 
-def test_threshold_change_rejudges_memoized_candidate(memo_db) -> None:
+def test_threshold_change_reuses_memoized_score_with_new_decision(memo_db) -> None:
+    """Production 2026-11-07: a threshold change re-judged every listing on every search (hours of
+    VLM time on a 2-slot server). The stored score is still valid for the same profile version, so
+    only the alert decision is recomputed."""
     service = _make_service()
     search = _search().model_copy(update={"alert_threshold": 80, "effective_alert_threshold": 80})
     taste = TasteProfile(summary="", taste_prompt="likes vintage")
@@ -325,27 +328,17 @@ def test_threshold_change_rejudges_memoized_candidate(memo_db) -> None:
     )
     _seed_judged_candidate(memo_db, "search-001:item-1", prior)
 
-    jpeg = _jpeg()
+    with patch.object(service, "_download_candidate_image") as download:
+        traces, stages = _call_judge(service, [_raw("item-1")], search, taste, _db_settings())
 
-    def _judge(*, candidate: CandidateImageInput, **kwargs) -> CandidateJudgment:
-        return CandidateJudgment(score=80, explanation="new threshold", labels=[], concerns=[])
-
-    def _download(*, candidate_id: str, image_urls: list[str]) -> CandidateImageInput:
-        return CandidateImageInput(candidate_id=candidate_id, image_bytes=jpeg)
-
-    service.taste_client.judge_candidate.side_effect = _judge
-    with patch.object(service, "_download_candidate_image", side_effect=_download) as download:
-        traces, stages = _call_judge(service, 
-            [_raw("item-1")],
-            search,
-            taste,
-            _db_settings(),
-        )
-
+    trace = traces["search-001:item-1"]
     assert stages["search-001:item-1"] == "vlm_judged"
-    assert traces["search-001:item-1"].threshold == 0.8
-    assert traces["search-001:item-1"].decision == "alert"
-    download.assert_called_once()
+    assert trace.score_10 == 80
+    assert trace.explanation == "old threshold"
+    assert trace.threshold == 0.8
+    assert trace.decision == "alert"
+    download.assert_not_called()
+    service.taste_client.judge_candidate.assert_not_called()
 
 
 def test_stale_version_and_failed_candidates_are_rejudged(memo_db) -> None:
