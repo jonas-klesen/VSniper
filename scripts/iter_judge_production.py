@@ -1,5 +1,5 @@
 """Smoke-check the actual production judge (with the new structured-block anchors) on the
-4-pic held-out grid. 3 trials. Should remain in the 7-8 avg / range <=4 territory."""
+4 held-out pics, one request each. 3 trials. Should remain in the 7-8 avg / range <=4 territory."""
 
 from __future__ import annotations
 
@@ -74,18 +74,17 @@ def main() -> None:
 
     all_scores: list[list[int]] = []
     for trial in range(3):
-        result = client.judge_candidate_grid(
-            taste_profile=taste,
-            candidates=candidates,
-            liked_anchors=liked_anchors,
-            disliked_anchors=[],
-        )
         scores: list[int] = []
         print(f"=== trial {trial + 1} ===")
         for cand in candidates:
-            j = result.judgments[cand.candidate_id]
+            j = client.judge_candidate(
+                taste_profile=taste,
+                candidate=cand,
+                liked_anchors=liked_anchors,
+                disliked_anchors=[],
+            )
             scores.append(j.score)
-            print(f"  {j.position:12s} {j.score}/10  {j.explanation}")
+            print(f"  {cand.candidate_id:12s} {j.score}/10  {j.explanation}")
         all_scores.append(scores)
         avg = sum(scores) / len(scores)
         print(f"  -> avg={avg:.2f}  min={min(scores)}  range={max(scores) - min(scores)}\n")

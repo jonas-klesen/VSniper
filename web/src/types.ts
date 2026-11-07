@@ -199,8 +199,6 @@ export type ScoreTrace = {
   concerns: string[];
   model?: string | null;
   prompt_version?: number | null;
-  grid_batch_id?: string | null;
-  grid_position?: 'top_left' | 'top_center' | 'top_right' | 'middle_left' | 'middle_center' | 'middle_right' | 'bottom_left' | 'bottom_center' | 'bottom_right' | null;
   judged_at?: string | null;
   raw_response: Record<string, unknown>;
 };
@@ -365,7 +363,6 @@ export type SettingsSnapshot = {
   learn_model_id: string | null;
   observation_model_id: string | null;
   models: AiModelConfig[];
-  vlm_grid_size: number;
   vlm_pack_multiple_listing_images: boolean;
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;

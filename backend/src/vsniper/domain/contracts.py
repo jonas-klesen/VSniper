@@ -11,17 +11,6 @@ ScanMode = Literal["preview", "live"]
 ExtractionStatus = Literal["pending", "completed", "failed"]
 DeliveryStatus = Literal["not_queued", "pending", "processing", "sent", "failed"]
 AiProvider = Literal["openai", "cerebras", "local", "openrouter"]
-GridPosition = Literal[
-    "top_left",
-    "top_center",
-    "top_right",
-    "middle_left",
-    "middle_center",
-    "middle_right",
-    "bottom_left",
-    "bottom_center",
-    "bottom_right",
-]
 TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note"]
 ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
 
@@ -261,7 +250,6 @@ class SearchDraftApplyResult(BaseModel):
 
 
 class CandidateJudgment(BaseModel):
-    position: GridPosition
     score: int = Field(ge=1, le=100)
     explanation: str
     labels: list[str] = Field(default_factory=list)
@@ -286,8 +274,6 @@ class ScoreTrace(BaseModel):
     concerns: list[str] = Field(default_factory=list)
     model: str | None = None
     prompt_version: int | None = None
-    grid_batch_id: str | None = None
-    grid_position: GridPosition | None = None
     judged_at: datetime | None = None
     raw_response: dict = Field(default_factory=dict)
 
@@ -427,7 +413,6 @@ class SettingsSnapshot(BaseModel):
     learn_model_id: str | None = None
     observation_model_id: str | None = None
     models: list[AiModelConfig] = Field(default_factory=list)
-    vlm_grid_size: int
     vlm_pack_multiple_listing_images: bool = True
     vlm_judge_parallel_requests: int = 1
     ai_judge_image_max_px: int = 512
@@ -704,7 +689,6 @@ class SettingsUpdate(BaseModel):
     judge_fallback_model_id: str | None = None
     learn_model_id: str | None = None
     observation_model_id: str | None = None
-    vlm_grid_size: int | None = None
     vlm_pack_multiple_listing_images: bool | None = None
     vlm_judge_parallel_requests: int | None = None
     ai_judge_image_max_px: int | None = None
@@ -718,13 +702,6 @@ class SettingsUpdate(BaseModel):
         if normalized != "de":
             raise ValueError("Only the de Vinted region is supported.")
         return normalized
-
-    @field_validator("vlm_grid_size")
-    @classmethod
-    def _validate_vlm_grid_size(cls, value: int | None) -> int | None:
-        if value is not None and value not in {1, 4, 9}:
-            raise ValueError("VLM grid size must be 1, 4, or 9.")
-        return value
 
     @field_validator("vlm_judge_parallel_requests")
     @classmethod

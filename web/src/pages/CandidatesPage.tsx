@@ -511,7 +511,6 @@ export function CandidatesPage() {
                       <li><strong>Extraction:</strong> {candidate.extraction_status}{candidate.extraction_error ? ` - ${candidate.extraction_error}` : ''}</li>
                       <li><strong>Judge model:</strong> {candidate.score_trace.model ?? 'unknown'}</li>
                       <li><strong>Prompt version:</strong> {candidate.score_trace.prompt_version ?? 'unknown'}</li>
-                      <li><strong>Grid position:</strong> {candidate.score_trace.grid_position ?? 'not batched'}</li>
                     </ul>
                   </details>
                   <CandidateFeedback candidate={candidate} feedbackMutation={feedbackMutation} />

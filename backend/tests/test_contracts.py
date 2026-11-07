@@ -47,25 +47,6 @@ def test_settings_update_rejects_invalid_vlm_parallel_requests() -> None:
         SettingsUpdate.model_validate(payload)
 
 
-def test_settings_update_rejects_invalid_vlm_grid_size() -> None:
-    payload = {
-        "vinted_region": "de",
-        "vlm_grid_size": 6,
-    }
-
-    with pytest.raises(ValidationError, match="VLM grid size must be 1, 4, or 9"):
-        SettingsUpdate.model_validate(payload)
-
-
-def test_settings_update_accepts_single_image_vlm_grid_size() -> None:
-    payload = {
-        "vinted_region": "de",
-        "vlm_grid_size": 1,
-    }
-
-    assert SettingsUpdate.model_validate(payload).vlm_grid_size == 1
-
-
 def test_settings_update_accepts_single_parallel_request() -> None:
     payload = {
         "vinted_region": "de",
@@ -160,7 +141,6 @@ def test_settings_snapshot_splits_local_judge_from_openai_learning(monkeypatch) 
             judge_fallback_model_id=None,
             learn_model_id=None,
             observation_model_id=None,
-            vlm_grid_size=1,
             vlm_pack_multiple_listing_images=True,
             vlm_judge_parallel_requests=1,
             ai_judge_image_max_px=512,

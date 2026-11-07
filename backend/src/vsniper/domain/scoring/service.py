@@ -24,7 +24,6 @@ def build_judgment_trace(
     judgment: CandidateJudgment,
     taste_profile: TasteProfile,
     model: str,
-    batch_id: str,
     alert_threshold: int | None = None,
 ) -> ScoreTrace:
     effective_alert_threshold = _coerce_alert_threshold(alert_threshold)
@@ -47,8 +46,6 @@ def build_judgment_trace(
         concerns=judgment.concerns,
         model=model,
         prompt_version=taste_profile.version,
-        grid_batch_id=batch_id,
-        grid_position=judgment.position,
         judged_at=datetime.now(UTC),
     )
 

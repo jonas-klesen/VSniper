@@ -62,21 +62,21 @@ The system keeps two explicit layers:
 
 Cross-item leakage is intentional: each item profile is built primarily from evidence in its own bucket, then receives `cross_item_influence` from the rest of the wardrobe and feedback history. That lets, for example, playful color, vintage outdoor cues, or weird humor learned from hats influence trouser or shoe judging without forcing exact garment matches across buckets.
 
-At scan time a saved search uses its `clothing_item` to select the matching item taste profile. VLM grid judging and Telegram feedback both operate against that item-specific prompt and rubric. Feedback examples inherit the clothing bucket from the source search, so later recomputes can separate target-item evidence from cross-item influence.
+At scan time a saved search uses its `clothing_item` to select the matching item taste profile. VLM judging and Telegram feedback both operate against that item-specific prompt and rubric. Feedback examples inherit the clothing bucket from the source search, so later recomputes can separate target-item evidence from cross-item influence.
 
 Saved searches are Vinted-category-scoped from the same `clothing_item`. The backend injects a resolvable category filter when one is missing, validates manually supplied category aliases against the selected bucket, and applies the same defaults to legacy searches at run time. Taste recompute prompts include the allowed Vinted category aliases/IDs so generated drafts choose from known values, but backend post-processing remains the source of truth.
 
 ## Local judge model
 
-Scan-time judging can run through either OpenAI or a local OpenAI-compatible VLM. `ai_judge_provider` defaults to `local`; `openai` uses OpenAI directly. Local support is deliberately narrow: it is for judging only, and it always calls `POST {LOCAL_VLM_BASE_URL}/responses`. Do not add `/chat/completions` as an alternate local path.
+Scan-time judging can run through either OpenAI or a local OpenAI-compatible VLM. Every listing is judged in its own request: one square image (the main photo, or up to four photos packed together) plus the item-specific prompt. Local support is deliberately narrow: it is for judging only.
 
-When `ai_judge_provider` is `local`, `OpenAITasteClient.judge_candidate_grid()` sends the same contact-sheet image and prompt context as the OpenAI path, but uses llama.cpp's supported structured-output request shape:
+When the judge provider is `local`, `OpenAITasteClient.judge_candidate()` calls llama.cpp's `POST {base_url}/chat/completions` (its `/responses` endpoint returns no logprobs) with:
 
-- top-level `json_schema`, not OpenAI Responses `text.format`
-- no `reasoning` field
-- a local-specific grid schema containing only occupied positions
+- the search-constant prompt context as a leading user message, so llama.cpp can reuse it as a cached prefix
+- `response_format` JSON schema output and no `reasoning` field
+- `logprobs` with the top 20 alternatives
 
-The local schema avoids `anyOf` and null slots because llama.cpp documents limitations around `anyOf` inside object properties. Local calls use `local_judge_model`; OpenAI calls use `ai_judge_model`. If `ai_judge_fallback_provider` is `openai` or `cerebras`, failed local calls retry once through the selected provider with `ai_judge_model` or `cerebras_judge_model`; when the provider is already OpenAI, there is no fallback. Missing or malformed outputs still flow through the existing retry/failure behavior in `SearchService._judge_image_batch()`: retry the affected items individually, then mark failures with a failed `ScoreTrace`.
+The local score is the probability-weighted value of the score token rather than the sampled number. A small judge spreads its belief over several rubric band edges, and near-greedy sampling otherwise collapses most listings onto the single most likely edge. When the logprobs do not yield exactly one score, the sampled score is used. If a fallback model is configured, a failed primary call retries once through it; a listing that still fails gets a failed `ScoreTrace` in `SearchService._judge_listing()` without affecting other listings.
 
 Cerebras fallback is judge-only. It uses `POST {CEREBRAS_API_BASE_URL}/chat/completions` with a `gemma-4-31b` default, base64 image data URIs, and strict `response_format` JSON schema output.
 

@@ -336,7 +336,6 @@ def settings_to_contract(model: AppSettingsState, session: Session) -> SettingsS
                 )
                 for row in model_rows
             ],
-            "vlm_grid_size": model.vlm_grid_size,
             "vlm_pack_multiple_listing_images": (
                 True
                 if getattr(model, "vlm_pack_multiple_listing_images", True) is None

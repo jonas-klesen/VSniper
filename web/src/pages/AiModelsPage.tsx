@@ -32,7 +32,6 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   judge_fallback_model_id: null,
   learn_model_id: null,
   observation_model_id: null,
-  vlm_grid_size: 1,
   vlm_pack_multiple_listing_images: true,
   vlm_judge_parallel_requests: 1,
   ai_judge_image_max_px: 512,
@@ -77,7 +76,6 @@ export function AiModelsPage() {
       judge_fallback_model_id: settingsQuery.data.judge_fallback_model_id,
       learn_model_id: settingsQuery.data.learn_model_id,
       observation_model_id: settingsQuery.data.observation_model_id,
-      vlm_grid_size: settingsQuery.data.vlm_grid_size,
       vlm_pack_multiple_listing_images: settingsQuery.data.vlm_pack_multiple_listing_images,
       vlm_judge_parallel_requests: settingsQuery.data.vlm_judge_parallel_requests,
       ai_judge_image_max_px: settingsQuery.data.ai_judge_image_max_px,
@@ -292,15 +290,7 @@ export function AiModelsPage() {
               <h4>Judge invocation</h4>
               <p className="muted">Controls how listing photos are packed and sent to the judge model.</p>
             </div>
-            <div className="form-grid three-up">
-              <label>
-                VLM grid
-                <select value={aiSettings.vlm_grid_size} onChange={(e) => setAiSetting('vlm_grid_size', Number(e.target.value))}>
-                  <option value={1}>1x1</option>
-                  <option value={4}>2x2</option>
-                  <option value={9}>3x3</option>
-                </select>
-              </label>
+            <div className="form-grid">
               <label>
                 Parallel requests
                 <DecimalInput
@@ -312,7 +302,7 @@ export function AiModelsPage() {
                 />
               </label>
               <label>
-                Tile size per image (px)
+                Image size (px)
                 <DecimalInput
                   type="text"
                   inputMode="numeric"
@@ -320,7 +310,6 @@ export function AiModelsPage() {
                   normalize={(raw) => String(Math.max(64, Math.min(2048, Math.round(parsePositiveNumber(raw, aiSettings.ai_judge_image_max_px)))))}
                   onCommit={(normalized) => setAiSetting('ai_judge_image_max_px', Number(normalized))}
                 />
-                <span className="field-help">Max candidate tile dimension. A 2x2 grid at 512 px produces a roughly 1096 px sheet.</span>
               </label>
             </div>
             <label className="checkbox-label settings-checkbox-card" style={{ marginTop: '1rem' }}>
