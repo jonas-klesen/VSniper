@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     ai_judge_reasoning_effort: str = Field(default="low", alias="AI_JUDGE_REASONING_EFFORT")
     ai_judge_image_detail: str = Field(default="low", alias="AI_JUDGE_IMAGE_DETAIL")
     local_vlm_base_url: str = Field(default="http://127.0.0.1:8080/v1", alias="LOCAL_VLM_BASE_URL")
-    ai_learn_model: str = Field(default="gpt-5.5", alias="AI_LEARN_MODEL")
+    ai_learn_model: str = Field(default="gpt-6.1-sol", alias="AI_LEARN_MODEL")
     ai_learn_reasoning_effort: str = Field(default="medium", alias="AI_LEARN_REASONING_EFFORT")
     ai_learn_image_detail: str = Field(default="low", alias="AI_LEARN_IMAGE_DETAIL")
     ai_observation_provider: str = Field(default="local", alias="AI_OBSERVATION_PROVIDER")

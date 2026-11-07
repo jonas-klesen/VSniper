@@ -10,6 +10,11 @@ _warned_unknown: set[str] = set()
 # prompt cache (roughly 0.1x for the gpt-5 family, 0.25x–0.5x for older models). These are
 # best-effort estimates; local and unknown models are intentionally absent and report $0.
 _PRICING: dict[str, tuple[float, float, float]] = {
+    "gpt-6-astra": (10.0, 50.0, 1.0),
+    "gpt-6.1-sol": (2.0, 10.0, 0.1),
+    "gpt-6-sol": (2.0, 10.0, 0.2),
+    "gpt-6.1-terra": (1.0, 5.0, 0.05),
+    "gpt-6-luna": (0.1, 0.5, 0.01),
     "gpt-5.5": (5.0, 30.0, 0.5),
     "gpt-5.4": (2.5, 15.0, 0.25),
     "gpt-5.4-mini": (0.75, 4.5, 0.075),
