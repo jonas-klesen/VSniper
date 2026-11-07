@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from threading import Event, Lock, Thread
+from threading import BoundedSemaphore, Event, Lock, Thread
 from typing import Any
 
 import httpx
@@ -140,6 +140,11 @@ def _alert_threshold(value: int | None, *, fallback: int = 95) -> int:
 
 
 _logger = logging.getLogger(__name__)
+
+# Listing pages are fetched for every judged listing, across all concurrently running searches.
+# Judging is far slower than fetching, so a low cap costs no throughput and keeps the scanner's
+# request rate to Vinted's item pages browser-like.
+_LISTING_PAGE_FETCHES = BoundedSemaphore(2)
 
 
 class SearchRunAlreadyClaimed(RuntimeError):
@@ -542,7 +547,8 @@ class SearchService:
         if max_photos <= 1 or not raw.get("url"):
             return search_urls[:max_photos]
         try:
-            page_urls = self.vinted_client.fetch_listing_photo_urls(raw["url"])
+            with _LISTING_PAGE_FETCHES:
+                page_urls = self.vinted_client.fetch_listing_photo_urls(raw["url"])
         except VintedClientError as exc:
             _logger.warning("listing photos unavailable for %s, judging the search photo: %s", raw["url"], exc)
             page_urls = []
