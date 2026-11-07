@@ -159,7 +159,7 @@ def test_pending_deliveries_respects_limit(tmp_path) -> None:
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
     with factory() as session:
-        session.add(Search(id="s1", name="S", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="S", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         for i in range(10):
             session.add(Candidate(
                 id=f"c{i}", clothing_item="hosen", search_id="s1", title="t", brand="b",

@@ -81,7 +81,7 @@ def test_dashboard_candidates_today_excludes_older_candidates(monkeypatch, tmp_p
     today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         session.add(_candidate("old", created_at=today_start - timedelta(seconds=1)))
         session.add(_candidate("today", created_at=today_start + timedelta(seconds=1)))
         session.commit()
@@ -97,7 +97,7 @@ def test_score_distribution_bins_by_final_score_and_respects_window(monkeypatch,
     now = datetime.now(UTC)
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         recent_scored = _candidate("recent-high", created_at=now - timedelta(hours=1))
         recent_scored.final_score = 0.85  # falls in the 81-90 bin
         old_scored = _candidate("old-mid", created_at=now - timedelta(days=10))
@@ -126,7 +126,7 @@ def test_candidate_page_defaults_to_recent_unreviewed_candidates_sorted_by_score
     now = datetime.now(UTC)
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         lower_score = _candidate("recent-low", created_at=now - timedelta(hours=1))
         lower_score.final_score = 0.6
         higher_score = _candidate("recent-high", created_at=now - timedelta(hours=2))
@@ -180,7 +180,7 @@ def test_feedback_returns_before_observation_and_applies_it_in_background(monkey
     monkeypatch.setattr(service, "_compute_candidate_observation", slow_observation)
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         session.add(_candidate("candidate-1", created_at=datetime.now(UTC)))
         session.commit()
 
@@ -224,7 +224,7 @@ def test_feedback_comment_can_be_cleared(monkeypatch, tmp_path) -> None:
     service.settings = SimpleNamespace()
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         candidate = _candidate("candidate-1", created_at=datetime.now(UTC))
         candidate.feedback = "like"
         candidate.feedback_comment = "old comment"
@@ -258,7 +258,7 @@ def test_feedback_idempotency_requires_same_comment(monkeypatch, tmp_path) -> No
     service.settings = SimpleNamespace()
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         candidate = _candidate("candidate-1", created_at=datetime.now(UTC))
         candidate.feedback = "like"
         candidate.feedback_comment = "same"
@@ -324,7 +324,7 @@ def test_note_only_feedback_keeps_unknown_verdict_and_upserts_sample(monkeypatch
     service.settings = SimpleNamespace()
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         candidate = _candidate("candidate-1", created_at=datetime.now(UTC))
         candidate.ai_observation = {"garment_type": "trousers"}
         session.add(candidate)
@@ -360,7 +360,7 @@ def test_prune_old_records_drops_aged_rows_and_keeps_pending(monkeypatch, tmp_pa
         )
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         session.add(_candidate("recent", created_at=now))
         session.add(_candidate("old", created_at=old))  # pruned (aged out)
         session.add(_candidate("recent-terminal", created_at=now))

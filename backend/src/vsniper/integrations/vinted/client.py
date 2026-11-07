@@ -562,20 +562,23 @@ class VintedClient:
             if health.status != "healthy":
                 raise VintedSessionError(health.detail, retryable=False)
 
-        payload = self._request_catalog(
-            region=search.region,
-            legacy_path="/api/v2/catalog/items",
-            gateway_path="/svc-catalogue/items",
-            params=self._build_search_params(search),
-        )
-        items = self._extract_items(payload)
-        normalized: list[dict[str, Any]] = []
-        for item in items:
-            try:
-                normalized.append(self._normalise_item(item, search))
-            except ValueError:
-                continue
-        return normalized
+        # Vinted returns only listings matching every word of a query, so each keyword group is
+        # its own catalog search. A listing found by several groups keeps the first group's tag.
+        listings: dict[str, dict[str, Any]] = {}
+        for query in search.queries:
+            payload = self._request_catalog(
+                region=search.region,
+                legacy_path="/api/v2/catalog/items",
+                gateway_path="/svc-catalogue/items",
+                params=self._build_search_params(search, query=query),
+            )
+            for item in self._extract_items(payload):
+                try:
+                    listing = self._normalise_item(item, search)
+                except ValueError:
+                    continue
+                listings.setdefault(listing["external_item_id"], {**listing, "query": query})
+        return list(listings.values())
 
     def fetch_item_by_url(self, url: str, *, clothing_item: ClothingItem, region: str = "de") -> dict[str, Any]:
         item_id = self.listing_id_from_url(url)
@@ -590,7 +593,6 @@ class VintedClient:
             name="Offer by URL",
             enabled=True,
             clothing_item=clothing_item,
-            query="",
             region=region,
             filters=[],
         )
@@ -892,13 +894,13 @@ class VintedClient:
             detail += " Refresh the Vinted credentials in Settings with a fresh full Cookie header from an authenticated browser tab."
         return detail
 
-    def _build_search_params(self, search: SearchRecord) -> dict[str, Any]:
+    def _build_search_params(self, search: SearchRecord, *, query: str) -> dict[str, Any]:
         # A real browser starts a fresh search/browse session per search action; minting these
         # once per VintedClient instance instead (a long-lived api/worker process) reuses the
         # same ids across thousands of unrelated searches over hours, which Vinted's anti-bot
         # system eventually soft-blocks (200 OK, but zero items) rather than rejecting outright.
         params: dict[str, Any] = {
-            "search_text": search.query,
+            "search_text": query,
             "page": 1,
             "per_page": VINTED_CATALOG_PER_PAGE,
             "time": int(datetime.now(UTC).timestamp()),
@@ -1162,7 +1164,7 @@ class VintedClient:
     @staticmethod
     def _filter_context_params(*, search: SearchRecord, current_params: dict[str, Any]) -> dict[str, Any]:
         params: dict[str, Any] = {
-            "search_text": search.query,
+            "search_text": current_params.get("search_text", ""),
             "order": current_params.get("order", "newest_first"),
             "currency": current_params.get("currency", VINTED_CURRENCY),
         }

@@ -27,10 +27,12 @@ from vsniper.domain.contracts import (
     CandidateJudgment,
     ClothingItem,
     ClothingItemTasteProfile,
+    MAX_SEARCH_QUERIES,
     GeneratedSearchDraft,
     LabeledExample,
     ReferenceObservation,
     TasteProfile,
+    normalize_search_queries,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,10 +176,10 @@ TASTE_PROFILE_SCHEMA: dict[str, Any] = {
                     "generated_search": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["name", "query", "region", "rationale"],
+                        "required": ["name", "queries", "region", "rationale"],
                         "properties": {
                             "name": {"type": "string"},
-                            "query": {"type": "string"},
+                            "queries": STRING_ARRAY_SCHEMA,
                             "region": {"type": "string"},
                             "rationale": {"type": "string"},
                         },
@@ -1435,14 +1437,18 @@ class OpenAITasteClient:
                     "7. transparency_labels: 6-12 short user-facing chips summarising the taste.\n"
                     "8. item_profiles: return exactly one profile for each clothing_item key listed in Evidence JSON. "
                     "Each item profile must have its own taste_prompt, rubric, and exactly one "
-                    "generated_search. generated_search.query is 1-3 broad, German-first words (e.g. 'vintage strickjacke'): "
-                    "Vinted only returns listings that match every word, so longer queries return nothing. The judge, "
-                    "not the query, does the fine taste filtering; do not include price as taste.\n"
+                    "generated_search. generated_search.queries lists 3-5 separate Vinted searches for that clothing_item. "
+                    "Each query is 1-3 broad, German-first words (e.g. 'vintage strickjacke'): Vinted only returns "
+                    "listings that match every word, so longer queries return nothing. Group only words that would "
+                    "appear together in one listing title, and give each query a different facet of the taste (an "
+                    "item type, a style or era, a material or pattern) so their results overlap little; never repeat "
+                    "a query with reordered or inflected words. The judge, not the queries, does the fine taste "
+                    "filtering; do not include price as taste.\n"
                     "9. For every item profile, use that item's own samples as the strongest signal. Then let the "
                     "other clothing items leak in as cross_item_influence: palette, era, humor, texture, subculture, "
                     "and silhouette principles that should carry across categories without forcing exact item matches.\n"
                     "10. generated_search has no filters: the app fixes each clothing_item's Vinted categories, "
-                    "sizes and price. Put only search words in the query, never category names or sizes.\n"
+                    "sizes and price. Put only search words in the queries, never category names or sizes.\n"
                     "11. The user is eclectic - stay descriptive, not prescriptive. Do not close the door on adjacent "
                     "subcultures unless the evidence is explicit.\n"
                     "12. Treat `liked_examples_from_history` and `disliked_examples_from_history` as the HIGHEST-priority "
@@ -1501,7 +1507,7 @@ class OpenAITasteClient:
                 id=f"draft-{uuid4().hex[:8]}",
                 clothing_item=item_key,
                 name=str(search_raw.get("name") or f"{CLOTHING_ITEM_LABELS[item_key]} search"),
-                query=str(search_raw.get("query") or ""),
+                queries=normalize_search_queries(_coerce_list(search_raw.get("queries") or []))[:MAX_SEARCH_QUERIES],
                 region=str(search_raw.get("region") or region),
                 filters=filters,
                 rationale=str(search_raw.get("rationale") or ""),
@@ -1536,7 +1542,7 @@ class OpenAITasteClient:
                 id=f"draft-{uuid4().hex[:8]}",
                 clothing_item=clothing_item,
                 name=f"{label} search",
-                query="",
+                queries=[],
                 region=region,
                 filters=[default_category_filter_for_clothing_item(clothing_item)],
                 rationale="Fallback draft because the model omitted this clothing item.",

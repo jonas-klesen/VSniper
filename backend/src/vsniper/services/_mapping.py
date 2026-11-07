@@ -194,7 +194,7 @@ def search_to_record(model: Search, *, default_alert_threshold: int = 95) -> Sea
             "name": name,
             "enabled": model.enabled,
             "clothing_item": clothing_item,
-            "query": model.query,
+            "queries": list(model.queries or []),
             "region": model.region,
             "filters": model.filters or [],
             "alert_threshold": model.alert_threshold,

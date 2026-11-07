@@ -722,7 +722,7 @@ function defaultDraftSelection(search: SearchRecord, draft: GeneratedSearchDraft
   filterGroups: Set<string>;
 } {
   const fields = new Set<DraftFieldKey>();
-  if (search.query !== draft.query) fields.add('query');
+  if (search.queries.join('\n') !== draft.queries.join('\n')) fields.add('query');
   const filterGroups = new Set(
     filterDiffs(search.filters, withoutDraftPriceFilters(draft.filters))
       .filter((diff) => diff.key !== 'size' && diff.key !== 'price:range')
@@ -745,7 +745,7 @@ function mergeDraftIntoSearch(
   }
   return {
     clothing_item: search.clothing_item,
-    query: selectedFields.has('query') ? draft.query : search.query,
+    queries: selectedFields.has('query') ? draft.queries : search.queries,
     region: search.region,
     filters,
     alert_threshold: search.alert_threshold,
@@ -802,7 +802,7 @@ function DraftCompareModal({
 
   const hasSelection = selectedFields.size > 0 || selectedFilterGroups.size > 0;
   const fieldRows: { key: DraftFieldKey; label: string; current: string; draft: string }[] = [
-    { key: 'query', label: 'Vinted query', current: search.query || '—', draft: draft.query || '—' },
+    { key: 'query', label: 'Vinted queries', current: search.queries.join(' / ') || '—', draft: draft.queries.join(' / ') || '—' },
   ];
   const oldItemProfile = learningSnapshot?.old_taste_profile?.item_profiles[draft.clothing_item] ?? null;
   const newItemProfile = learningSnapshot?.new_taste_profile?.item_profiles[draft.clothing_item] ?? itemProfile;
@@ -1024,7 +1024,7 @@ function DraftSearches({
               <div>
                 <strong style={{ fontSize: '0.95rem' }}>{clothingItemLabel(draft.clothing_item)}</strong>
                 <p className="muted" style={{ fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
-                  {draft.query} · {draft.region} · {draft.rationale}
+                  {draft.queries.join(' / ')} · {draft.region} · {draft.rationale}
                 </p>
                 <p className="muted" style={{ fontSize: '0.8rem', margin: '0.2rem 0 0' }}>
                   Filters: {formatSearchFilters(withoutDraftPriceFilters(draft.filters))}

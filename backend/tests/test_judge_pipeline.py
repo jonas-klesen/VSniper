@@ -183,7 +183,7 @@ def _call_judge(service: SearchService, raw_candidates, search, taste, db_settin
 
 
 def _search(search_id: str = "search-001") -> SearchRecord:
-    return SearchRecord(id=search_id, name="Test", clothing_item="hosen", query="vintage", region="de")
+    return SearchRecord(id=search_id, name="Test", clothing_item="hosen", queries=["vintage"], region="de")
 
 
 def _jpeg(color: str = "red") -> bytes:
@@ -819,7 +819,7 @@ def test_cancel_check_stops_dispatching_further_batches_but_keeps_partial_work(m
     from vsniper.db.models import Search
 
     session = memo_db()
-    session.add(Search(id="search-001", name="Test", clothing_item="hosen", query="q", region="de", run_status="running"))
+    session.add(Search(id="search-001", name="Test", clothing_item="hosen", queries=["q"], region="de", run_status="running"))
     session.commit()
     session.close()
 

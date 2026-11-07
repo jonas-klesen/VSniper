@@ -23,7 +23,7 @@ export type SearchRecord = {
   name: string;
   enabled: boolean;
   clothing_item: ClothingItem;
-  query: string;
+  queries: string[];
   region: string;
   filters: SearchFilter[];
   alert_threshold: number | null;
@@ -37,7 +37,7 @@ export type SearchRecord = {
 export type SearchUpdatePayload = {
   name?: string;
   clothing_item: ClothingItem;
-  query: string;
+  queries: string[];
   region: string;
   filters: SearchFilter[];
   alert_threshold: number | null;
@@ -91,7 +91,7 @@ export type GeneratedSearchDraft = {
   id: string;
   clothing_item: ClothingItem;
   name: string;
-  query: string;
+  queries: string[];
   region: string;
   filters: SearchFilter[];
   rationale: string;

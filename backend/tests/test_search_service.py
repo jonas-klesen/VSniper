@@ -46,11 +46,11 @@ def _setup(monkeypatch, tmp_path, *, grouped_sizes):
 
     with fake_session_scope() as session:
         session.add(AppSettingsState(id=1, vinted_region="de"))
-        session.add(Search(id="search-schuhe", name="Schuhe", clothing_item="schuhe", query="q", region="de", run_status="idle"))
-        session.add(Search(id="search-hosen", name="Hosen", clothing_item="hosen", query="q", region="de", run_status="idle"))
-        session.add(Search(id="search-kopf", name="Kopf", clothing_item="kopf", query="q", region="de", run_status="idle"))
-        session.add(Search(id="search-obenrum-warm", name="Obenrum Warm", clothing_item="obenrum_warm", query="q", region="de", run_status="idle"))
-        session.add(Search(id="search-obenrum-mittel", name="Obenrum Mittel", clothing_item="obenrum_mittel", query="q", region="de", run_status="idle"))
+        session.add(Search(id="search-schuhe", name="Schuhe", clothing_item="schuhe", queries=["q"], region="de", run_status="idle"))
+        session.add(Search(id="search-hosen", name="Hosen", clothing_item="hosen", queries=["q"], region="de", run_status="idle"))
+        session.add(Search(id="search-kopf", name="Kopf", clothing_item="kopf", queries=["q"], region="de", run_status="idle"))
+        session.add(Search(id="search-obenrum-warm", name="Obenrum Warm", clothing_item="obenrum_warm", queries=["q"], region="de", run_status="idle"))
+        session.add(Search(id="search-obenrum-mittel", name="Obenrum Mittel", clothing_item="obenrum_mittel", queries=["q"], region="de", run_status="idle"))
 
     service = SearchService.__new__(SearchService)
     service.vinted_client = type(
@@ -138,7 +138,7 @@ def test_apply_generated_drafts_preserves_the_user_price_ceiling(monkeypatch, tm
                 id="draft-shoes",
                 clothing_item="schuhe",
                 name="Generated shoes",
-                query="retro sneaker",
+                queries=["retro sneaker", "skate schuh"],
                 region="de",
                 filters=[draft_price, draft_category],
                 created_at=datetime.now(UTC),
@@ -159,5 +159,5 @@ def test_apply_generated_drafts_preserves_the_user_price_ceiling(monkeypatch, tm
     with factory() as session:
         search = session.get(Search, "search-schuhe")
         filters = [SearchFilter.model_validate(item) for item in search.filters]
-    assert search.query == "retro sneaker"
+    assert search.queries == ["retro sneaker", "skate schuh"]
     assert [filter_.values for filter_ in filters if filter_.field == "price"] == [["20"]]

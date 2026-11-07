@@ -278,7 +278,7 @@ def test_operations_snapshot_returns_all_sections(tmp_path, monkeypatch):
             session.add(MaintenanceState(id=MAINTENANCE_ROW_ID, mode="idle", updated_at=datetime.now(UTC)))
             session.add(TasteState(id=1, manual_note="", taste_profile={}))
             session.add(AppSettingsState(id=1, vinted_region="de"))
-            session.add(Search(id="s1", name="Test", clothing_item="hosen", query="q", region="de", run_status="idle"))
+            session.add(Search(id="s1", name="Test", clothing_item="hosen", queries=["q"], region="de", run_status="idle"))
 
         snapshot = ops.get_operations_snapshot()
         assert snapshot.maintenance_mode == "idle"
@@ -307,7 +307,7 @@ def test_operations_snapshot_includes_failed_deliveries(tmp_path, monkeypatch):
             session.add(MaintenanceState(id=MAINTENANCE_ROW_ID, mode="idle", updated_at=now))
             session.add(TasteState(id=1, manual_note="", taste_profile={}))
             session.add(AppSettingsState(id=1, vinted_region="de"))
-            session.add(Search(id="s1", name="Test", clothing_item="hosen", query="q", region="de"))
+            session.add(Search(id="s1", name="Test", clothing_item="hosen", queries=["q"], region="de"))
             session.add(Candidate(
                 id="s1:item-1", search_id="s1", clothing_item="hosen", title="Test item",
                 brand="Brand", price_eur=20.0, size="M", url="https://example.test/1",

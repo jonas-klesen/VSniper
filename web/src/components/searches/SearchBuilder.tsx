@@ -32,7 +32,7 @@ import type {
 export type SearchFormState = {
   name: string;
   clothing_item: ClothingItem;
-  query: string;
+  queries: string[];
   region: string;
   enabled: boolean;
   filters: SearchFilter[];
@@ -103,7 +103,7 @@ export function formFromSearch(search: SearchRecord): SearchFormState {
   return {
     name: search.name,
     clothing_item: search.clothing_item,
-    query: search.query,
+    queries: search.queries,
     region: 'de',
     enabled: search.enabled,
     filters: search.filters,
@@ -112,12 +112,12 @@ export function formFromSearch(search: SearchRecord): SearchFormState {
 }
 
 export function payloadFromForm(form: SearchFormState): Omit<SearchUpdatePayload, 'enabled'> {
-  const query = form.query.trim();
+  const queries = unique(form.queries.map((query) => query.trim()));
   const region = form.region.trim().toLowerCase();
   if (region !== 'de') throw new Error('Only the de Vinted region is supported.');
   return {
     clothing_item: form.clothing_item,
-    query,
+    queries,
     region,
     filters: form.filters,
     alert_threshold: form.alert_threshold,
@@ -126,7 +126,7 @@ export function payloadFromForm(form: SearchFormState): Omit<SearchUpdatePayload
 
 function validationIssues(form: SearchFormState): string[] {
   const issues: string[] = [];
-  if (!form.query.trim()) issues.push('Add a Vinted query, for example “cargo patchwork” or “vintage adidas”.');
+  if (!form.queries.length) issues.push('Add a Vinted query, for example “cargo patchwork” or “vintage adidas”.');
   return issues;
 }
 
@@ -469,10 +469,14 @@ export function SearchBuilderModal({
                 <strong>{searchLabel}</strong>
                 <small>Fixed bucket name</small>
               </div>
-              <label>
-                Vinted query
-                <input value={form.query} onChange={(event) => onChange({ ...form, query: event.target.value })} />
-              </label>
+              <div>
+                <span className="field-help">Vinted queries</span>
+                <ChipEditor
+                  values={form.queries}
+                  placeholder="cargo patchwork, vintage adidas…"
+                  onChange={(queries) => onChange({ ...form, queries })}
+                />
+              </div>
               <div className="readonly-field">
                 <span>Clothing item</span>
                 <strong>{clothingItemLabel(form.clothing_item)}</strong>
@@ -552,7 +556,7 @@ export function SearchCard({
   const avoidValues = valuesFor(search.filters, isAvoidKeywordFilter);
   const priceCeiling = priceCeilingFor(search.filters);
   const advancedCount = search.filters.filter((filter) => !isGuidedFilter(filter)).length;
-  const canRun = search.query.trim().length > 0;
+  const canRun = search.queries.length > 0;
   const saveForm = (form: SearchFormState) => {
     const payload = payloadFromForm(form);
     onQuickSave({ ...payload, enabled: form.enabled });
@@ -572,7 +576,7 @@ export function SearchCard({
         <div>
           <h3>{search.name}</h3>
           <p className="muted search-card__summary">
-            {clothingItemLabel(search.clothing_item)} · {search.query} · region {search.region}
+            {clothingItemLabel(search.clothing_item)} · {search.queries.join(' / ')} · region {search.region}
           </p>
         </div>
         <span className={`pill ${search.enabled ? 'healthy' : 'missing'}`}>{search.enabled ? 'enabled' : 'disabled'}</span>

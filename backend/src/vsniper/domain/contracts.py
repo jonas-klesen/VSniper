@@ -18,6 +18,22 @@ ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obe
 JUDGE_MAX_PHOTOS = 6
 JUDGE_MAX_PHOTOS_LIMIT = 20
 
+# Keyword groups per saved search. Vinted returns only listings matching every word of a query,
+# so each group runs as its own catalog request; this bounds the requests per run.
+MAX_SEARCH_QUERIES = 8
+
+
+def normalize_search_queries(values: list[str]) -> list[str]:
+    """Trim each keyword group and drop blank and case-insensitive duplicate groups, keeping order."""
+    queries: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        query = " ".join(str(value).split())
+        if query and query.casefold() not in seen:
+            seen.add(query.casefold())
+            queries.append(query)
+    return queries
+
 CLOTHING_ITEM_LABELS: dict[ClothingItem, str] = {
     "schuhe": "Schuhe",
     "hosen": "Hosen",
@@ -58,7 +74,7 @@ class SearchRecord(BaseModel):
     name: str
     enabled: bool = True
     clothing_item: ClothingItem
-    query: str
+    queries: list[str] = Field(default_factory=list)
     region: str
     filters: list[SearchFilter] = Field(default_factory=list)
     alert_threshold: int | None = None
@@ -73,11 +89,19 @@ class GeneratedSearchDraft(BaseModel):
     id: str
     clothing_item: ClothingItem
     name: str
-    query: str
+    queries: list[str] = Field(default_factory=list)
     region: str
     filters: list[SearchFilter] = Field(default_factory=list)
     rationale: str = ""
     created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_stored_single_query(cls, data: object) -> object:
+        # Profiles stored before keyword groups hold one `query` string per draft.
+        if isinstance(data, dict) and "queries" not in data and "query" in data:
+            data = {**data, "queries": [data["query"]] if str(data["query"] or "").strip() else []}
+        return data
 
 
 class ClothingItemTasteProfile(BaseModel):
@@ -501,11 +525,19 @@ class TransparencySnapshot(BaseModel):
 class SearchUpdate(BaseModel):
     name: str = ""
     clothing_item: ClothingItem
-    query: str
+    queries: list[str] = Field(default_factory=list)
     region: str
     filters: list[SearchFilter] = Field(default_factory=list)
     alert_threshold: int | None = None
     enabled: bool = True
+
+    @field_validator("queries")
+    @classmethod
+    def _normalize_queries(cls, value: list[str]) -> list[str]:
+        queries = normalize_search_queries(value)
+        if len(queries) > MAX_SEARCH_QUERIES:
+            raise ValueError(f"A search can have at most {MAX_SEARCH_QUERIES} keyword groups.")
+        return queries
 
     @field_validator("region")
     @classmethod

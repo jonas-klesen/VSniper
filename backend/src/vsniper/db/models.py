@@ -16,7 +16,8 @@ class Search(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     clothing_item: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    query: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Keyword groups; each runs as its own Vinted catalog search.
+    queries: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     region: Mapped[str] = mapped_column(String(16), nullable=False)
     filters: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     alert_threshold: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from vsniper.core.database import Base
 from vsniper.db.models import AiModelConfig, AppSettingsState
-from vsniper.domain.contracts import SearchUpdate, SettingsUpdate
+from vsniper.domain.contracts import MAX_SEARCH_QUERIES, GeneratedSearchDraft, SearchUpdate, SettingsUpdate
 from vsniper.services._mapping import settings_to_contract
 
 
@@ -19,7 +19,7 @@ def test_search_update_only_accepts_de_region() -> None:
     payload = {
         "name": "Search",
         "clothing_item": "hosen",
-        "query": "vintage",
+        "queries": ["vintage"],
         "region": "fr",
         "filters": [],
     }
@@ -62,6 +62,29 @@ def test_settings_update_rejects_out_of_range_photo_limit(photos: int) -> None:
         SettingsUpdate.model_validate({"vinted_region": "de", "ai_judge_max_photos": photos})
 
 
+def test_search_update_normalizes_queries() -> None:
+    update = SearchUpdate.model_validate(
+        {"clothing_item": "schuhe", "region": "de", "queries": [" chunky sneaker ", "", "Chunky Sneaker", "skate schuh"]}
+    )
+
+    assert update.queries == ["chunky sneaker", "skate schuh"]
+
+
+def test_search_update_rejects_too_many_queries() -> None:
+    queries = [f"query {index}" for index in range(MAX_SEARCH_QUERIES + 1)]
+    with pytest.raises(ValidationError):
+        SearchUpdate.model_validate({"clothing_item": "schuhe", "region": "de", "queries": queries})
+
+
+def test_stored_single_query_draft_reads_as_one_query() -> None:
+    draft = GeneratedSearchDraft.model_validate(
+        {"id": "d", "clothing_item": "kopf", "name": "Kopf", "query": "bunte cap", "region": "de",
+         "created_at": "2026-11-07T10:00:00Z"}
+    )
+
+    assert draft.queries == ["bunte cap"]
+
+
 def test_settings_update_rejects_invalid_alert_threshold() -> None:
     payload = {
         "vinted_region": "de",
@@ -75,7 +98,7 @@ def test_settings_update_rejects_invalid_alert_threshold() -> None:
 def test_search_update_rejects_invalid_alert_threshold() -> None:
     payload = {
         "clothing_item": "hosen",
-        "query": "vintage",
+        "queries": ["vintage"],
         "region": "de",
         "filters": [],
         "alert_threshold": 0,

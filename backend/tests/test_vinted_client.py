@@ -51,7 +51,7 @@ def test_sizes_resolve_without_listing_constraints(monkeypatch) -> None:
 
     client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
-        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='long generated query', region='de',
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', queries=['long generated query'], region='de',
         filters=[
             SearchFilter(field='price', label='Price', values=['30'], mode='range'),
             SearchFilter(field='size', label='Size', values=['W32 | DE 48', 'W33 | DE 48'], mode='include'),
@@ -60,7 +60,7 @@ def test_sizes_resolve_without_listing_constraints(monkeypatch) -> None:
         last_run_at=None, last_found_count=0,
     )
     assert client.run_search(search, validate_session=False) == []
-    assert client.run_search(search.model_copy(update={'query': 'another query'}), validate_session=False) == []
+    assert client.run_search(search.model_copy(update={'queries': ['another query']}), validate_session=False) == []
     assert len(lookups) == 1
 
 
@@ -81,7 +81,7 @@ def test_unresolved_sizes_never_remove_filter(monkeypatch, sizes) -> None:
 
     client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
-        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', queries=['cargo'], region='de',
         filters=[SearchFilter(field='size', label='Size', values=sizes, mode='include')],
         last_run_at=None, last_found_count=0,
     )
@@ -131,7 +131,7 @@ def test_search_uses_api_host_after_legacy_404(monkeypatch) -> None:
 
     client = VintedClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
-        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', queries=['cargo'], region='de',
         filters=[
             SearchFilter(field='category', label='Category', values=['hosen'], mode='include'),
             SearchFilter(field='colour', label='Colour', values=['black'], mode='include'),
@@ -189,7 +189,7 @@ def test_filter_lookup_uses_gateway_after_404(monkeypatch, field, operation) -> 
 
     client = VintedClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
-        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', queries=['cargo'], region='de',
         filters=[
             SearchFilter(field='price', label='Price', values=['30'], mode='range'),
             SearchFilter(field=field, label=field, values=['M'], mode='include'),
@@ -223,7 +223,7 @@ def test_filter_lookup_preserves_errors(monkeypatch, status, gateway) -> None:
 
     client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
     search = SearchRecord(
-        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', query='cargo', region='de',
+        id='search-hosen', name='Cargo', enabled=True, clothing_item='hosen', queries=['cargo'], region='de',
         filters=[SearchFilter(field='size', label='Size', values=['M'], mode='include')],
         last_run_at=None, last_found_count=0,
     )
@@ -305,7 +305,7 @@ def test_vinted_client_validates_session_and_normalises_results(monkeypatch) -> 
         name='Wool jackets',
         enabled=True,
         clothing_item='obenrum_kalt',
-        query='wool jacket',
+        queries=['wool jacket'],
         region='de',
         filters=[
             SearchFilter(field='size', label='Sizes', values=['M', 'L'], mode='include'),
@@ -367,7 +367,7 @@ def test_vinted_client_resolves_numeric_looking_size_titles_via_facets(monkeypat
         name='Suit jackets',
         enabled=True,
         clothing_item='obenrum_kalt',
-        query='suit jacket',
+        queries=['suit jacket'],
         region='de',
         filters=[SearchFilter(field='size', label='Sizes', values=['54'], mode='include')],
         last_run_at=None,
@@ -407,7 +407,7 @@ def test_vinted_client_scopes_size_facets_to_category_even_when_size_filter_is_l
         name='Cargo pants',
         enabled=True,
         clothing_item='hosen',
-        query='cargo pants',
+        queries=['cargo pants'],
         region='de',
         filters=[
             SearchFilter(field='size', label='Sizes', values=['M'], mode='include'),
@@ -462,7 +462,7 @@ def test_vinted_client_builds_id_based_filter_params(monkeypatch) -> None:
         name='Wool jackets',
         enabled=True,
         clothing_item='obenrum_kalt',
-        query='wool jacket',
+        queries=['wool jacket'],
         region='de',
         filters=[
             SearchFilter(field='category', label='Category', values=['jackets', 'coats'], mode='include'),
@@ -672,7 +672,7 @@ def test_vinted_client_generated_anon_id_is_stable_and_does_not_fake_csrf(monkey
         name='Sneakers',
         enabled=True,
         clothing_item='schuhe',
-        query='sneakers',
+        queries=['sneakers'],
         region='de',
         filters=[],
         last_run_at=None,
@@ -715,7 +715,7 @@ def test_vinted_client_does_not_forward_exclude_filters(monkeypatch) -> None:
         name='Sneakers',
         enabled=True,
         clothing_item='schuhe',
-        query='sneakers',
+        queries=['sneakers'],
         region='de',
         filters=[
             SearchFilter(field='condition', label='Condition', values=['satisfactory'], mode='exclude'),
@@ -725,7 +725,7 @@ def test_vinted_client_does_not_forward_exclude_filters(monkeypatch) -> None:
     )
 
     assert client.run_search(search, validate_session=False) == []
-    params = client._build_search_params(search)
+    params = client._build_search_params(search, query="sneakers")
     assert 'status_ids' not in params
     assert 'filter[condition]' not in params
 
@@ -834,7 +834,7 @@ def test_vinted_client_resolves_real_mens_category_aliases(monkeypatch) -> None:
         name='Mens wardrobe categories',
         enabled=True,
         clothing_item='obenrum_kalt',
-        query='vintage menswear',
+        queries=['vintage menswear'],
         region='de',
         filters=[
             SearchFilter(
@@ -889,7 +889,7 @@ def test_vinted_client_sends_the_fixed_bucket_catalog_ids(monkeypatch) -> None:
         name='Obenrum Kalt',
         enabled=True,
         clothing_item='obenrum_kalt',
-        query='strickjacke',
+        queries=['strickjacke'],
         region='de',
         filters=[default_category_filter_for_clothing_item('obenrum_kalt')],
         last_run_at=None,
@@ -925,7 +925,7 @@ def test_vinted_client_skips_unresolved_category_filters(monkeypatch) -> None:
         name='Colorful cargos',
         enabled=True,
         clothing_item='hosen',
-        query='cargo pants',
+        queries=['cargo pants'],
         region='de',
         filters=[
             SearchFilter(field='category', label='Category', values=['gorp fairy', 'space wizard'], mode='include'),
@@ -990,7 +990,7 @@ def test_vinted_client_non_success_error_includes_empty_body_and_refresh_context
         name='Sneakers',
         enabled=True,
         clothing_item='schuhe',
-        query='vintage sneakers',
+        queries=['vintage sneakers'],
         region='de',
         filters=[],
         last_run_at=None,
@@ -1044,7 +1044,7 @@ def test_normalise_item_handles_photo_shapes_and_missing_timestamp() -> None:
         name='Wool jackets',
         enabled=True,
         clothing_item='obenrum_kalt',
-        query='wool jacket',
+        queries=['wool jacket'],
         region='de',
         filters=[],
         last_run_at=None,
@@ -1301,3 +1301,40 @@ def test_fetch_listing_photo_urls_reads_photos_beyond_the_rendered_gallery(monke
         'https://images1.vinted.net/t/02_005a7_MFW4rNrrnaKgJQqs2RcfWVUi/f800/4f774ea9.webp'
         '?s=608da5e688c175064bb6febb82c96cac93d54dc0'
     )
+
+
+def test_run_search_runs_each_query_and_dedupes_listings(monkeypatch) -> None:
+    # Vinted returns only listings matching every word of a query, so each keyword group is
+    # its own catalog request; a listing found by several groups is returned once.
+    token = _jwt_with_expiry(datetime.now(UTC) + timedelta(hours=2))
+    monkeypatch.setattr(
+        'vsniper.integrations.vinted.client.get_settings',
+        lambda: SimpleNamespace(vinted_cookie=token, vinted_region='de'),
+    )
+    items_by_query = {
+        'chunky sneaker': [{'id': 1, 'title': 'Sneaker A'}, {'id': 2, 'title': 'Sneaker B'}],
+        'skate schuh': [{'id': 2, 'title': 'Sneaker B'}, {'id': 3, 'title': 'Skate C'}],
+    }
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/api/v2/catalog/items':
+            query = request.url.params['search_text']
+            sent.append(query)
+            return httpx.Response(200, json={'items': items_by_query[query]})
+        raise AssertionError(f'unexpected request: {request.method} {request.url}')
+
+    client = VintedClient(base_url='https://www.vinted.test', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    search = SearchRecord(
+        id='search-schuhe',
+        name='Schuhe',
+        clothing_item='schuhe',
+        queries=['chunky sneaker', 'skate schuh'],
+        region='de',
+    )
+
+    listings = client.run_search(search, validate_session=False)
+
+    assert sent == ['chunky sneaker', 'skate schuh']
+    assert [listing['id'] for listing in listings] == ['1', '2', '3']
+    assert [listing['query'] for listing in listings] == ['chunky sneaker', 'chunky sneaker', 'skate schuh']

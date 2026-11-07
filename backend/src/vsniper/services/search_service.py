@@ -224,7 +224,7 @@ class SearchService:
             filters = ensure_category_filter_for_clothing_item(payload.filters, model.clothing_item)
 
             model.name = CLOTHING_ITEM_LABELS.get(model.clothing_item, model.name)
-            model.query = payload.query
+            model.queries = payload.queries
             model.region = payload.region
             model.filters = [item.model_dump(mode="json") for item in filters]
             model.alert_threshold = payload.alert_threshold
@@ -339,11 +339,11 @@ class SearchService:
                 ]
                 changed = (
                     search.name != CLOTHING_ITEM_LABELS.get(search.clothing_item, search.name)
-                    or search.query != draft.query
+                    or list(search.queries or []) != draft.queries
                     or (search.filters or []) != filter_payload
                 )
                 search.name = CLOTHING_ITEM_LABELS.get(search.clothing_item, search.name)
-                search.query = draft.query
+                search.queries = draft.queries
                 # Preserve existing region — taste drafts shouldn't override per-search region
                 search.filters = filter_payload
                 if changed:
@@ -480,7 +480,8 @@ class SearchService:
             "search_id": search_record.id,
             "search_name": search_record.name,
             "clothing_item": search_record.clothing_item,
-            "query": search_record.query,
+            # The keyword group that found the listing.
+            "query": raw.get("query", ""),
             "region": search_record.region,
             "title": raw["title"],
             "brand": raw["brand"],
@@ -943,7 +944,7 @@ class SearchService:
             self._refresh_claim(search_id)
         try:
             # Phase 2 — network I/O (Vinted fetch + image downloads + VLM judging). No DB lock held.
-            if not search_record.query.strip():
+            if not search_record.queries:
                 raise SearchNotConfigured(
                     f"Search '{search_record.name}' needs a Vinted query before it can be run."
                 )

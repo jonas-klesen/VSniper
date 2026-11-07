@@ -102,7 +102,7 @@ def test_add_offer_reuses_candidate_and_copies_cached_image(monkeypatch, tmp_pat
     factory = service._test_factory
     now = datetime.now(UTC)
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         session.add(
             Candidate(
                 id="s1:12345",
@@ -158,7 +158,7 @@ def test_candidate_feedback_sample_uses_durable_images(monkeypatch, tmp_path) ->
     now = datetime.now(UTC)
 
     with factory() as session:
-        session.add(Search(id="s1", name="Search", clothing_item="hosen", query="q", region="de", enabled=True))
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
         candidate = Candidate(
             id="candidate-1",
             search_id="s1",

@@ -60,7 +60,7 @@ def _setup(monkeypatch, tmp_path):
     monkeypatch.setattr("vsniper.services.operations_service.session_scope", fake_session_scope)
 
     with fake_session_scope() as session:
-        session.add(Search(id="s1", name="S", clothing_item="hosen", query="q", region="de", run_status="idle"))
+        session.add(Search(id="s1", name="S", clothing_item="hosen", queries=["q"], region="de", run_status="idle"))
 
     service = SearchService.__new__(SearchService)
     return service, factory
@@ -345,7 +345,7 @@ def test_canonical_search_values_cover_every_clothing_item() -> None:
 def test_database_rejects_duplicate_clothing_item(monkeypatch, tmp_path) -> None:
     _, factory = _setup(monkeypatch, tmp_path)
     session = factory()
-    session.add(Search(id="s2", name="Other", clothing_item="hosen", query="q", region="de"))
+    session.add(Search(id="s2", name="Other", clothing_item="hosen", queries=["q"], region="de"))
 
     with pytest.raises(IntegrityError):
         session.commit()
@@ -376,7 +376,7 @@ def test_update_injects_category_filter_from_clothing_item(monkeypatch, tmp_path
         SearchUpdate(
             name="Trousers",
             clothing_item="hosen",
-            query="cargo",
+            queries=["cargo"],
             region="de",
             enabled=True,
             filters=[],
@@ -396,7 +396,7 @@ def test_update_rejects_changing_clothing_item(monkeypatch, tmp_path) -> None:
             SearchUpdate(
                 name="Warm tops",
                 clothing_item="obenrum_warm",
-                query="graphic tee",
+                queries=["graphic tee"],
                 region="de",
                 enabled=True,
                 filters=[],
@@ -412,7 +412,7 @@ def test_update_replaces_a_submitted_category_filter_with_the_fixed_one(monkeypa
         SearchUpdate(
             name="Trousers",
             clothing_item="hosen",
-            query="cargo",
+            queries=["cargo"],
             region="de",
             enabled=True,
             filters=[SearchFilter(field="category", label="Category", values=["schuhe"], mode="include")],
@@ -436,7 +436,7 @@ def test_persist_run_sets_created_at_before_queueing_new_alert(monkeypatch, tmp_
         name="S",
         enabled=True,
         clothing_item="hosen",
-        query="q",
+        queries=["q"],
         region="de",
         filters=[],
         last_run_at=None,
@@ -495,7 +495,7 @@ def test_persist_run_sets_created_at_before_queueing_new_alert(monkeypatch, tmp_
 
 def _persist_minimal(service, factory, *, mode):
     search_record = SearchRecord(
-        id="s1", name="S", enabled=True, clothing_item="hosen", query="q", region="de",
+        id="s1", name="S", enabled=True, clothing_item="hosen", queries=["q"], region="de",
         filters=[], last_run_at=None, last_found_count=0,
     )
     raw = {

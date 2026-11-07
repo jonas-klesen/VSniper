@@ -26,7 +26,7 @@ def canonical_search_values(clothing_item: ClothingItem, *, now: datetime | None
         "id": canonical_search_id(clothing_item),
         "name": canonical_search_name(clothing_item),
         "clothing_item": clothing_item,
-        "query": "",
+        "queries": [],
         "region": "de",
         "filters": [category_filter.model_dump(mode="json")],
         "alert_threshold": None,
