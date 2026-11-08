@@ -58,7 +58,12 @@ class Settings(BaseSettings):
     ai_learn_model: str = Field(default="gpt-6.1-sol", alias="AI_LEARN_MODEL")
     ai_learn_reasoning_effort: str = Field(default="medium", alias="AI_LEARN_REASONING_EFFORT")
     ai_learn_image_detail: str = Field(default="low", alias="AI_LEARN_IMAGE_DETAIL")
-    ai_observation_provider: str = Field(default="local", alias="AI_OBSERVATION_PROVIDER")
+    ai_observation_provider: str = Field(default="openai", alias="AI_OBSERVATION_PROVIDER")
+    ai_observation_model: str = Field(default="gpt-6.1-terra", alias="AI_OBSERVATION_MODEL")
+    ai_observation_reasoning_effort: str = Field(default="low", alias="AI_OBSERVATION_REASONING_EFFORT")
+    # Re-judges listings the local judge shortlists; empty disables the cascade.
+    ai_verify_model: str = Field(default="gpt-6.1-terra", alias="AI_VERIFY_MODEL")
+    ai_verify_reasoning_effort: str = Field(default="low", alias="AI_VERIFY_REASONING_EFFORT")
     local_observation_model: str = Field(default="lfm25-vl-clothing", alias="LOCAL_OBSERVATION_MODEL")
     ai_learn_observation_batch_size: int = Field(default=15, alias="AI_LEARN_OBSERVATION_BATCH_SIZE")
     vlm_judge_parallel_requests: int = Field(default=1, alias="VLM_JUDGE_PARALLEL_REQUESTS")

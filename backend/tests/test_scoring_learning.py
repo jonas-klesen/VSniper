@@ -628,8 +628,8 @@ def test_describe_candidate_image_includes_metadata_in_prompt() -> None:
         prompt_text = payload["input"][0]["content"][0]["text"]
         assert "Listing metadata for context" in prompt_text
         assert "target marketplace is Vinted DE" in prompt_text
-        assert "When metadata is German" in prompt_text
-        assert "preserve useful German Vinted search words" in prompt_text
+        assert "Write every field in English" in prompt_text
+        assert 'The shopper disliked this listing and wrote: "zu weiter Kragen"' in prompt_text
         assert "Title: Cargo Pants" in prompt_text
         assert "Brand: Carhartt" in prompt_text
         assert "Size: 32" in prompt_text
@@ -672,6 +672,8 @@ def test_describe_candidate_image_includes_metadata_in_prompt() -> None:
         size="32",
         condition="Good",
         description="Classic utility trousers with side pockets.",
+        verdict="dislike",
+        user_comment=" zu weiter Kragen ",
         provider="openai",
         model="gpt-5.5",
         reasoning_effort="medium",
@@ -1343,3 +1345,26 @@ def test_judgment_truncation_retry_bumps_output_budget(monkeypatch) -> None:
     assert result.score == 7
     assert len(seen_budgets) == 2
     assert seen_budgets[1] > seen_budgets[0]
+
+
+def test_image_inputs_declare_the_detected_format_not_the_file_extension() -> None:
+    # Vinted serves WebP; feedback assets keep a .jpg name. Anthropic models reject a WebP
+    # body that is declared as image/jpeg, so the data URL must carry the real format.
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.read().decode("utf-8"))
+        sent.extend(part["image_url"] for part in payload["input"][0]["content"] if part["type"] == "input_image")
+        observation = {key: "x" for key in ("garment_type", "silhouette_and_cut", "color_palette",
+                                              "fabric_and_texture", "prints_or_patterns", "details_and_hardware",
+                                              "era_or_subculture")}
+        text = json.dumps({**observation, "vibe_keywords": ["x"]})
+        return httpx.Response(200, json={"output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}]})
+
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(buffer, format="WEBP")
+    _mock_openai_client(handler).describe_candidate_image(
+        image_bytes=buffer.getvalue(), mime_type="image/jpeg", provider="openai", model="gpt-5.5", reasoning_effort="low"
+    )
+
+    assert sent and sent[0].startswith("data:image/webp;base64,")

@@ -62,8 +62,8 @@ def _extract_refresh_token_from_cookie(cookie: str) -> str:
     return ""
 
 
-def _default_model_seeds() -> tuple[list[_DefaultModelSeed], str, str | None, str, str]:
-    """Derive the default ai_models rows (deduped) plus the four settings model ids from env
+def _default_model_seeds() -> tuple[list[_DefaultModelSeed], str, str | None, str, str, str | None]:
+    """Derive the default ai_models rows (deduped) plus the five settings model ids from env
     config, mirroring the data migration's seeding logic for a brand-new (empty) database."""
     runtime = get_settings()
 
@@ -96,8 +96,8 @@ def _default_model_seeds() -> tuple[list[_DefaultModelSeed], str, str | None, st
         observation_base_url = judge_base_url
     else:
         observation_provider = "openai"
-        observation_model_name = learn_model_name
-        observation_effort = learn_effort
+        observation_model_name = runtime.ai_observation_model or learn_model_name
+        observation_effort = runtime.ai_observation_reasoning_effort
         observation_base_url = None
 
     seeds: list[_DefaultModelSeed] = []
@@ -128,10 +128,18 @@ def _default_model_seeds() -> tuple[list[_DefaultModelSeed], str, str | None, st
     )
     learn_model_id = _seed(learn_provider, learn_model_name, learn_effort, None)
     observation_model_id = _seed(observation_provider, observation_model_name, observation_effort, observation_base_url)
+    verify_model_id = _seed("openai", runtime.ai_verify_model.strip(), runtime.ai_verify_reasoning_effort, None)
 
     assert judge_model_id is not None  # local_judge_model/ai_judge_model always have a default
     assert learn_model_id is not None  # ai_learn_model always has a default
-    return seeds, judge_model_id, judge_fallback_model_id, learn_model_id, observation_model_id or judge_model_id
+    return (
+        seeds,
+        judge_model_id,
+        judge_fallback_model_id,
+        learn_model_id,
+        observation_model_id or judge_model_id,
+        verify_model_id,
+    )
 
 
 def _default_settings(now: datetime) -> SettingsSnapshot:
@@ -249,8 +257,9 @@ class AppState:
             judge_fallback_model_id: str | None = None
             learn_model_id: str | None = None
             observation_model_id: str | None = None
+            verify_model_id: str | None = None
             if not settings_row_existed:
-                seeds, judge_model_id, judge_fallback_model_id, learn_model_id, observation_model_id = (
+                seeds, judge_model_id, judge_fallback_model_id, learn_model_id, observation_model_id, verify_model_id = (
                     _default_model_seeds()
                 )
                 for seed in seeds:
@@ -284,6 +293,7 @@ class AppState:
                     judge_fallback_model_id=judge_fallback_model_id,
                     learn_model_id=learn_model_id,
                     observation_model_id=observation_model_id,
+                    verify_model_id=verify_model_id,
                     vlm_judge_parallel_requests=settings.vlm_judge_parallel_requests,
                     ai_judge_image_max_px=settings.ai_judge_image_max_px,
                     ai_judge_max_photos=settings.ai_judge_max_photos,

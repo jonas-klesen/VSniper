@@ -901,3 +901,109 @@ def test_undecodable_cached_image_marks_failed_and_deletes_cache(tmp_path: Path)
     assert stages["search-001:item-1"] == "failed"
     assert "could not be decoded" in traces["search-001:item-1"].explanation
     assert not poison_path.exists()
+
+
+VERIFIER = ResolvedAiModel(
+    id="model-verify", provider="openai", model_name="gpt-verify", reasoning_effort="low", local_base_url=None
+)
+
+
+def _cascade_judge(local_scores: dict[str, int], verified_scores: dict[str, int | Exception]):
+    """Fake judge: the local model scores by title, the verifier by title or raises."""
+    calls: list[tuple[str, str]] = []
+
+    def _judge(*, candidate, ai_judge_provider, model, **kwargs):
+        calls.append((model, candidate.title))
+        if ai_judge_provider == "local":
+            return CandidateJudgment(score=local_scores[candidate.title], explanation="local", labels=[], concerns=[])
+        result = verified_scores[candidate.title]
+        if isinstance(result, Exception):
+            raise result
+        return CandidateJudgment(score=result, explanation="verified", labels=["v"], concerns=["deep V-neck"])
+
+    return _judge, calls
+
+
+def _judge_with_cascade(service, raws, search, taste, **kwargs):
+    jpeg = _jpeg()
+
+    def _download(*, candidate_id: str, image_urls: list[str]) -> CandidateImageInput:
+        return CandidateImageInput(candidate_id=candidate_id, image_bytes=jpeg)
+
+    with patch.object(service, "_download_candidate_image", side_effect=_download):
+        return _call_judge(service, raws, search, taste, _db_settings(), **kwargs)
+
+
+def test_shortlisted_listings_are_verified_and_the_verifier_decides_the_alert() -> None:
+    """Production 2026-11-08: the local 2B judge scored deep-V-neck cardigans the user disliked at
+    76-95, above their alert threshold. A strong hosted model re-judges only listings that reach
+    the search threshold; its score and the verified alert threshold decide the alert."""
+    service = _make_service()
+    search = _search().model_copy(update={"alert_threshold": 80, "effective_alert_threshold": 80})
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    judge, calls = _cascade_judge({"vneck": 85, "great": 84, "meh": 60}, {"vneck": 40, "great": 91})
+    service.taste_client.judge_candidate.side_effect = judge
+
+    traces, stages = _judge_with_cascade(
+        service, [_raw("1", title="vneck"), _raw("2", title="great"), _raw("3", title="meh")], search, taste,
+        verify_model=VERIFIER, verify_alert_threshold=85,
+    )
+
+    vneck, great, meh = (traces[f"search-001:{i}"] for i in ("1", "2", "3"))
+    assert (vneck.score_10, vneck.decision, vneck.screen_score, vneck.model) == (40, "discard", 85, "gpt-verify")
+    assert vneck.concerns == ["deep V-neck"]
+    assert (great.score_10, great.decision, great.screen_score, great.threshold) == (91, "alert", 84, 0.85)
+    assert (meh.score_10, meh.decision, meh.screen_score) == (60, "review", None)
+    assert sorted(c for c in calls if c[0] == "gpt-verify") == [("gpt-verify", "great"), ("gpt-verify", "vneck")]
+    assert set(stages.values()) == {"vlm_judged"}
+
+
+def test_failed_verification_keeps_the_local_judgment_and_retries_next_run(memo_db) -> None:
+    service = _make_service()
+    search = _search().model_copy(update={"alert_threshold": 80, "effective_alert_threshold": 80})
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    judge, _ = _cascade_judge({"flagged": 88}, {"flagged": OpenAIIntegrationError("flagged by moderation")})
+    service.taste_client.judge_candidate.side_effect = judge
+
+    traces, stages = _judge_with_cascade(
+        service, [_raw("1", title="flagged")], search, taste, verify_model=VERIFIER, verify_alert_threshold=85
+    )
+
+    trace = traces["search-001:1"]
+    assert (trace.score_10, trace.decision, trace.screen_score, stages["search-001:1"]) == (88, "alert", None, "vlm_judged")
+
+    _seed_judged_candidate(memo_db, "search-001:1", trace)
+    reused = service._memoized_judgments(
+        candidate_ids=["search-001:1"], profile_version=taste.version, alert_threshold=80,
+        verify_model=VERIFIER, verify_alert_threshold=85,
+    )
+    assert reused == {}
+
+
+def test_memoized_verified_judgment_keeps_the_verified_threshold(memo_db) -> None:
+    service = _make_service()
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    verified = build_judgment_trace(
+        judgment=CandidateJudgment(score=86, explanation="verified", labels=[], concerns=[]),
+        taste_profile=taste, model="gpt-verify", alert_threshold=90,
+    ).model_copy(update={"screen_score": 82, "screen_model": "local"})
+    _seed_judged_candidate(memo_db, "search-001:1", verified)
+    unverified_low = build_judgment_trace(
+        judgment=CandidateJudgment(score=70, explanation="local", labels=[], concerns=[]),
+        taste_profile=taste, model="local", alert_threshold=80,
+    )
+    _seed_judged_candidate(memo_db, "search-001:2", unverified_low)
+
+    with_verifier = service._memoized_judgments(
+        candidate_ids=["search-001:1", "search-001:2"], profile_version=taste.version, alert_threshold=80,
+        verify_model=VERIFIER, verify_alert_threshold=85,
+    )
+    without_verifier = service._memoized_judgments(
+        candidate_ids=["search-001:1", "search-001:2"], profile_version=taste.version, alert_threshold=80,
+        verify_model=None, verify_alert_threshold=85,
+    )
+
+    assert (with_verifier["search-001:1"].decision, with_verifier["search-001:1"].threshold) == ("alert", 0.85)
+    assert with_verifier["search-001:2"].decision == "review"
+    # Without a verifier the stored verified score is on another scale: judge the listing again.
+    assert set(without_verifier) == {"search-001:2"}

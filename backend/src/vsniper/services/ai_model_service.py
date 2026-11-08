@@ -96,6 +96,7 @@ def delete_model(model_id: str) -> None:
             settings_row.judge_fallback_model_id,
             settings_row.learn_model_id,
             settings_row.observation_model_id,
+            settings_row.verify_model_id,
         }:
             raise AiModelInUse(model_id)
         session.delete(row)

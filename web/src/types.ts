@@ -199,6 +199,8 @@ export type ScoreTrace = {
   concerns: string[];
   model?: string | null;
   prompt_version?: number | null;
+  screen_score?: number | null;
+  screen_model?: string | null;
   judged_at?: string | null;
   raw_response: Record<string, unknown>;
 };
@@ -362,6 +364,8 @@ export type SettingsSnapshot = {
   judge_fallback_model_id: string | null;
   learn_model_id: string | null;
   observation_model_id: string | null;
+  verify_model_id: string | null;
+  verify_alert_threshold: number;
   models: AiModelConfig[];
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;

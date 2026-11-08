@@ -88,7 +88,7 @@ Taste recompute builds an item profile and generated search per bucket. Same-buc
 
 Candidate judgments use integer scores from 1–100. The default alert threshold is 95 and may be overridden per search; scores from 50 up to the alert threshold are `review`, and lower scores are `discard`. Failed judgments produce discard traces.
 
-Candidates without a reusable current-profile trace go through vision judging, one request per listing; the local judge scores by the expected value of the score token. Failed or stale-profile judgments are retried. Keep output structured and explainable, including the score, explanation, labels, and concerns.
+Candidates without a reusable current-profile trace go through vision judging, one request per listing; the local judge scores by the expected value of the score token. With a verify model configured, a listing whose local score reaches the search threshold is judged again by that model, and its score decides the alert against the verified alert score; a failed verification keeps the local judgment and is retried. Failed or stale-profile judgments are retried. Keep output structured and explainable, including the score, explanation, labels, and concerns.
 
 Vinted session validation, search execution, and listing normalization are separate concerns in `integrations/vinted/client.py`. Parser changes require fixture-backed tests; add or update a saved `de` fixture instead of weakening assertions.
 

@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from time import perf_counter
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import httpx
@@ -312,7 +312,22 @@ def _coerce_list(value: list[str] | str) -> list[str]:
     return [part.strip() for part in value.split(";") if part.strip()]
 
 
+def _sniffed_image_mime(image_bytes: bytes) -> str | None:
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    if image_bytes[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return None
+
+
 def _image_data_url(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    # File names lie (Vinted WebP photos are stored as .jpg) and some providers reject a body
+    # whose declared type differs, so the bytes decide when they are recognisable.
+    mime_type = _sniffed_image_mime(image_bytes) or mime_type
     return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
 
@@ -1265,6 +1280,8 @@ class OpenAITasteClient:
         condition: str = "",
         description: str = "",
         clothing_item: ClothingItem = "hosen",
+        verdict: Literal["like", "dislike"] | None = None,
+        user_comment: str = "",
         provider: str,
         model: str,
         reasoning_effort: str,
@@ -1274,7 +1291,8 @@ class OpenAITasteClient:
     ) -> ReferenceObservation:
         """Single-image structured observation. Used to capture a snapshot of a Vinted
         candidate that the user just labelled, so the next taste-profile refresh has
-        image-grounded evidence (not just a one-line text summary)."""
+        image-grounded evidence (not just a one-line text summary). The verdict and comment
+        steer which visible features the fields must cover; the fields stay neutral."""
         meta_lines = []
         if title:
             meta_lines.append(f"Title: {title}")
@@ -1296,17 +1314,36 @@ class OpenAITasteClient:
         effort = "" if provider == "local" else reasoning_effort
         detail = image_detail or _setting_str(self.settings, "ai_learn_image_detail", "low")
 
+        verdict_prompt = ""
+        if verdict is not None:
+            reaction = "liked" if verdict == "like" else "disliked"
+            said = f' and wrote: "{user_comment.strip()}"' if user_comment.strip() else ""
+            verdict_prompt = (
+                f"\n\nThe shopper {reaction} this listing{said}. Make sure the fields name the visible features "
+                "that most likely decided this, above all any feature the comment refers to, in neutral words. "
+                "Describe the item, not the shopper's opinion."
+            )
+
         content: list[dict[str, Any]] = [
             {
                 "type": "input_text",
                 "text": (
-                    "Describe the clothing item in the attached photo as structured fields. Ignore background, "
-                    "mannequins, on-body styling and lighting. Be concrete and concise (each text field <= 25 words). "
-                    "Fill: garment_type, silhouette_and_cut, color_palette, fabric_and_texture, prints_or_patterns, "
-                    "details_and_hardware, era_or_subculture, vibe_keywords (3-6 short tags). "
-                    f"{VINTED_DE_LANGUAGE_CONTEXT} When metadata is German, translate/interpret it for the structured "
-                    "visual fields, but preserve useful German Vinted search words in vibe_keywords when helpful."
-                    f"{meta_prompt}"
+                    "Describe the clothing item in the attached Vinted photo as structured fields for a shopper's "
+                    "taste model. Describe only what the photo shows; ignore background, mannequins, the wearer and "
+                    "lighting. Write every field in English, concrete and concise (each text field <= 25 words, no "
+                    "marketing words):\n"
+                    "- garment_type: what it is.\n"
+                    "- silhouette_and_cut: shape, length and volume; for tops always name the neckline or collar "
+                    "(crew, V-neck and how deep, stand collar, shirt collar, hood, half-zip).\n"
+                    "- color_palette: 1-3 dominant colours and whether they are saturated, pastel, muted or dark.\n"
+                    "- fabric_and_texture: material look and surface.\n"
+                    "- prints_or_patterns: motif, scale and how much of the surface it covers, or 'solid'; say when "
+                    "text, lettering or a logo is a dominant element.\n"
+                    "- details_and_hardware: pockets, closures, trims, visible branding, wear or damage.\n"
+                    "- era_or_subculture: closest style reference and the visible cue that marks it.\n"
+                    "- vibe_keywords: 3-6 short tags; useful German Vinted search words are welcome here.\n"
+                    f"{VINTED_DE_LANGUAGE_CONTEXT}"
+                    f"{verdict_prompt}{meta_prompt}"
                 ),
             },
             {
@@ -1381,11 +1418,13 @@ class OpenAITasteClient:
         def _serialise_examples(examples: list[LabeledExample]) -> list[dict[str, Any]]:
             return [
                 {
+                    "id": ex.candidate_id,
                     "title": ex.title,
                     "brand": ex.brand,
                     "clothing_item": ex.clothing_item,
                     "verdict": ex.verdict,
                     "user_comment": ex.user_comment,
+                    "judge_score": ex.judge_score,
                     "observation": ex.observation.model_dump(mode="json") if ex.observation else None,
                 }
                 for ex in examples
@@ -1408,68 +1447,72 @@ class OpenAITasteClient:
             {
                 "type": "input_text",
                 "text": (
-                    "You are designing the single source-of-truth TASTE PROFILE that a small vision model will later "
-                    "use to score unseen Vinted listings 1-100 WITHOUT seeing the reference photos again. "
-                    "The output must be fully self-contained, calibrated, and free of references to specific reference "
-                    "images.\n\n"
+                    "You are writing the TASTE PROFILE that a small vision model will use to score unseen Vinted "
+                    "listings 1-100 for one shopper, without seeing this evidence again. The output must be "
+                    "self-contained, calibrated and free of references to specific evidence items.\n\n"
                     "The judge is a 2B-parameter local model. Per listing it sees ONE photo (the seller's main photo) "
                     "plus the German title and description, and reads your item profile literally. It cannot weigh "
-                    "long lists or stylist jargon; it decides from a few concrete cues it can check in that photo.\n\n"
+                    "long lists or stylist jargon, and it misses negations: in 'you do not mind V-necks' it reads "
+                    "'V-necks'. It decides from a few concrete cues it can check in that photo.\n\n"
                     f"{VINTED_DE_LANGUAGE_CONTEXT}\n\n"
+                    "Evidence JSON (below):\n"
+                    "- reference_observations: descriptions of photos of clothes the shopper owns and likes.\n"
+                    "- liked_examples_from_history / disliked_examples_from_history: Vinted listings the shopper "
+                    "rated, each with a structured photo observation, the shopper's own comment (user_comment, often "
+                    "German and informal) and judge_score: the score the current judge gave the listing before the "
+                    "shopper rated it. A disliked example with a high judge_score, or a liked one with a low score, "
+                    "marks a cue the judge gets wrong today.\n"
+                    "- notes: the shopper's own words about their taste.\n\n"
                     "Hard rules:\n"
-                    "1. Generalise to underlying aesthetic codes — silhouettes, palettes, eras, subcultures, fabrics. "
-                    "Do NOT lock in exact items like 'red cargo pants'; instead capture what makes them appealing "
-                    "('saturated primary-color utility trousers with flap pockets').\n"
-                    "2. taste_prompt: 100-180 words in short second-person sentences ('You like ...'). Open with the "
-                    "3-4 visible cues that best separate this category's liked items from its disliked ones, then "
-                    "the cues that should dock points. Name what a photo shows (shape, colour, pattern, print, "
-                    "hardware, material look); give an era or subculture only with the visible cue that marks it, and "
-                    "skip what a photo cannot show (fit on a body, weight, feel). The judge will only see this plus "
-                    "one listing photo and its text.\n"
-                    "3. core_aesthetic_summary: one sentence that names the overall aesthetic in stylist vocabulary.\n"
-                    "4. instant_alert_examples / instant_reject_examples: 3-5 short hypothetical listing-title-style "
+                    "1. Describe this shopper's taste as the evidence shows it, whatever it is (minimal, classic, "
+                    "loud, niche); assume no style the evidence does not show. Generalise to underlying codes "
+                    "(silhouette, palette, pattern, era, material, details) rather than exact items: not 'red cargo "
+                    "pants' but 'saturated primary-colour utility trousers with flap pockets'.\n"
+                    "2. Evidence priority: user comments, then rated examples, then notes, then reference "
+                    "observations. A comment states why the shopper decided; the visible cue it names outranks any "
+                    "pattern you infer. A cue the shopper rejected in two or more examples is a firm penalty.\n"
+                    "3. Compare liked and disliked examples within each clothing_item: the cues that separate them "
+                    "carry the profile; cues they share are not reasons either way. Give extra weight to the cues "
+                    "behind misjudged examples (high judge_score but disliked, low judge_score but liked).\n"
+                    "4. taste_prompt: 100-180 words of short second-person sentences. Open with the 3-4 visible cues "
+                    "that best mark a liked item in this category, then state each penalty as a plain sentence that "
+                    "names the cue and its effect ('Deep V-neck button cardigans score low.'). Write every cue "
+                    "positively and never hedge or negate ('you do not reject ...', 'not every ...'); if a cue only "
+                    "counts together with another, name both in one sentence. Name what a photo shows (shape, "
+                    "neckline, colour, pattern and its coverage, print or lettering, hardware, material look); give an "
+                    "era or subculture only with the visible cue that marks it, and skip what a photo cannot show "
+                    "(fit on a body, weight, feel).\n"
+                    "5. core_aesthetic_summary: one sentence that names the overall aesthetic.\n"
+                    "6. instant_alert_examples / instant_reject_examples: 3-5 short hypothetical listing-title-style "
                     "descriptions each, the kind of German-first or mixed German/English Vinted.de one-liner that "
                     "should land in the top band (81-100) vs the bottom band (1-20).\n"
-                    "5. scoring_rubric: one short sentence per band naming the 1-3 visible cues that put a listing in "
-                    "that band and not in its neighbours; never list the same cue in two bands. Calibrate the bands so the "
-                    "middle of the scale is genuinely usable: 1-20 = clear mismatch; 21-40 = wrong on a defining "
-                    "code though not offensive; 41-60 = plausible, wearable, but unremarkable for this taste; "
-                    "61-80 = genuinely promising with real reservations; 81-100 = confident match worth an alert. "
-                    "The 21-80 descriptions matter most — describe recognisable partial matches, not watered-down "
-                    "extremes.\n"
-                    "6. likes / dislikes_or_penalties: 5-12 bullets each, atomic and image-recognisable "
+                    "7. scoring_rubric: one short sentence per band naming the 1-3 visible cues that put a listing in "
+                    "that band and not in its neighbours; never list the same cue in two bands. Calibrate the bands so "
+                    "the middle of the scale is genuinely usable: 1-20 = clear mismatch; 21-40 = wrong on a defining "
+                    "code or carrying a firm penalty, even with otherwise fitting colours or pattern; 41-60 = "
+                    "plausible, wearable, but unremarkable for this taste; 61-80 = genuinely promising with real "
+                    "reservations; 81-100 = confident match worth an alert. The 21-80 descriptions matter most - "
+                    "describe recognisable partial matches, not watered-down extremes.\n"
+                    "8. likes / dislikes_or_penalties: 5-12 bullets each, atomic and image-recognisable "
                     "('visible cargo pockets', 'fast-fashion logo prints'). Avoid abstract feelings.\n"
-                    "7. transparency_labels: 6-12 short user-facing chips summarising the taste.\n"
-                    "8. item_profiles: return exactly one profile for each clothing_item key listed in Evidence JSON. "
-                    "Each item profile must have its own taste_prompt, rubric, and exactly one "
-                    "generated_search. generated_search.queries lists 3-5 separate Vinted searches for that clothing_item. "
-                    "Each query is 1-3 broad, German-first words (e.g. 'vintage strickjacke'): Vinted only returns "
-                    "listings that match every word, so longer queries return nothing. Group only words that would "
-                    "appear together in one listing title, and give each query a different facet of the taste (an "
-                    "item type, a style or era, a material or pattern) so their results overlap little; never repeat "
-                    "a query with reordered or inflected words. The judge, not the queries, does the fine taste "
-                    "filtering; do not include price as taste.\n"
-                    "9. For every item profile, use that item's own samples as the strongest signal. Then let the "
-                    "other clothing items leak in as cross_item_influence: palette, era, humor, texture, subculture, "
-                    "and silhouette principles that should carry across categories without forcing exact item matches.\n"
-                    "10. generated_search has no filters: the app fixes each clothing_item's Vinted categories, "
-                    "sizes and price. Put only search words in the queries, never category names or sizes.\n"
-                    "11. The user is eclectic - stay descriptive, not prescriptive. Do not close the door on adjacent "
-                    "subcultures unless the evidence is explicit.\n"
-                    "12. Treat `liked_examples_from_history` and `disliked_examples_from_history` as the HIGHEST-priority "
-                    "signal - these are real Vinted listings the user verdicted, with structured image observations "
-                    "attached. If history contradicts the reference photos, history wins.\n"
-                    "13. CONTRASTIVE REASONING (do this mentally before writing the output): scan the structured "
-                    "observation fields across ALL liked examples and ALL disliked examples and identify:\n"
-                    "    a) aesthetic codes that recur across the liked set (palette, silhouette, era, fabric, "
-                    "details, pattern)\n"
-                    "    b) aesthetic codes that recur across the disliked set\n"
-                    "    c) the contrast — codes that show up in (a) but not (b), and vice versa\n"
-                    "Anchor `likes` and `taste_prompt` on the codes from (a) — especially those that differentiate "
-                    "from (b). Anchor `dislikes_or_penalties` on the codes from (b) — especially those that "
-                    "differentiate from (a). Disliked items that share some codes with liked items should NOT make "
-                    "those shared codes penalties (e.g. if both liked and disliked items are 'cotton', cotton is not "
-                    "the differentiator). Discriminative codes carry more weight than universal ones.\n\n"
+                    "9. transparency_labels: 6-12 short user-facing chips summarising the taste.\n"
+                    "10. item_profiles: return exactly one profile for each clothing_item key listed in Evidence JSON. "
+                    "Each item profile must have its own taste_prompt, rubric, and exactly one generated_search. "
+                    "generated_search.queries lists 3-5 separate Vinted searches for that clothing_item. Each query is "
+                    "1-3 broad, German-first words (e.g. 'vintage strickjacke'): Vinted only returns listings that "
+                    "match every word, so longer queries return nothing. Group only words that would appear together "
+                    "in one listing title, and give each query a different facet of the taste (an item type, a style "
+                    "or era, a material or pattern) so their results overlap little; never repeat a query with "
+                    "reordered or inflected words. The judge, not the queries, does the fine taste filtering; do not "
+                    "include price as taste.\n"
+                    "11. For every item profile, that item's own examples are the strongest signal. Let the other "
+                    "clothing items leak in as cross_item_influence (palette, era, humour, texture, subculture, "
+                    "silhouette principles). A category with little evidence gets a broad profile built from "
+                    "cross-item signals, not invented specifics.\n"
+                    "12. generated_search has no filters: the app fixes each clothing_item's Vinted categories, sizes "
+                    "and price. Put only search words in the queries, never category names or sizes.\n"
+                    "13. Write every field in English, except the German search queries and the German-first "
+                    "example titles.\n\n"
                     f"Evidence JSON:\n{json.dumps(source_payload, ensure_ascii=False, indent=2)}"
                 ),
             }

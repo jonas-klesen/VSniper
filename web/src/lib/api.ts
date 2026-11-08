@@ -46,6 +46,8 @@ type SettingsUpdatePayload = {
   judge_fallback_model_id: string | null;
   learn_model_id: string | null;
   observation_model_id: string | null;
+  verify_model_id: string | null;
+  verify_alert_threshold: number;
   vlm_judge_parallel_requests: number;
   ai_judge_image_max_px: number;
   ai_judge_max_photos: number;
@@ -59,6 +61,8 @@ export type SettingsSavePayload = Omit<
   | 'judge_fallback_model_id'
   | 'learn_model_id'
   | 'observation_model_id'
+  | 'verify_model_id'
+  | 'verify_alert_threshold'
   | 'vlm_judge_parallel_requests'
   | 'ai_judge_image_max_px'
   | 'ai_judge_max_photos'
@@ -74,6 +78,8 @@ export type AiModelSettingsSavePayload = Pick<
   | 'judge_fallback_model_id'
   | 'learn_model_id'
   | 'observation_model_id'
+  | 'verify_model_id'
+  | 'verify_alert_threshold'
   | 'vlm_judge_parallel_requests'
   | 'ai_judge_image_max_px'
   | 'ai_judge_max_photos'

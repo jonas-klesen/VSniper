@@ -171,7 +171,8 @@ def test_feedback_returns_before_observation_and_applies_it_in_background(monkey
     ).model_dump(mode="json")
     release_observation = threading.Event()
 
-    def slow_observation(candidate_model, obs_settings):
+    def slow_observation(candidate_model, obs_settings, *, verdict, comment):
+        assert (verdict, comment) == ("like", "")
         assert release_observation.wait(timeout=5)
         return observation_payload
 
@@ -241,6 +242,9 @@ def test_feedback_comment_can_be_cleared(monkeypatch, tmp_path) -> None:
 
 def test_feedback_idempotency_requires_same_comment(monkeypatch, tmp_path) -> None:
     service, factory = _setup(monkeypatch, tmp_path)
+    # A new comment re-describes the photo; these tests run without an observation model.
+    monkeypatch.setattr(CandidateService, "_get_settings_state", staticmethod(lambda candidate_model: object()))
+    monkeypatch.setattr(service, "_observation_settings", lambda session, db_settings: None)
 
     class PreferencesRecorder:
         def existing_feedback_image_paths(self, session, *, candidate_id):
@@ -287,6 +291,9 @@ def test_feedback_idempotency_requires_same_comment(monkeypatch, tmp_path) -> No
 
 def test_note_only_feedback_keeps_unknown_verdict_and_upserts_sample(monkeypatch, tmp_path) -> None:
     service, factory = _setup(monkeypatch, tmp_path)
+    # A new comment re-describes the photo; these tests run without an observation model.
+    monkeypatch.setattr(CandidateService, "_get_settings_state", staticmethod(lambda candidate_model: object()))
+    monkeypatch.setattr(service, "_observation_settings", lambda session, db_settings: None)
     seen: dict = {}
 
     class PreferencesRecorder:
@@ -385,3 +392,59 @@ def test_prune_old_records_drops_aged_rows_and_keeps_pending(monkeypatch, tmp_pa
         assert session.scalar(select(func.count()).select_from(AiUsageEvent)) == 1
         surviving = {d.candidate_id: d.status for d in session.scalars(select(AlertDeliveryState)).all()}
         assert surviving == {"recent-pending": "pending"}
+
+
+def test_new_comment_redescribes_the_listing_with_the_verdict_and_comment(monkeypatch, tmp_path) -> None:
+    # Telegram feedback arrives as a vote first and a comment later. The observation is the profile
+    # writer's only view of the photo, so it must be redone with the comment ("zu weiter Kragen")
+    # to cover the feature the comment names; an unchanged comment must not cost another call.
+    service, factory = _setup(monkeypatch, tmp_path)
+
+    class PreferencesRecorder:
+        def existing_feedback_image_paths(self, session, *, candidate_id):
+            return []
+
+        def precache_feedback_images(self, *, candidate_id, image_urls):
+            return []
+
+        def upsert_candidate_feedback_sample(self, session, *, candidate, verdict, comment, stored_image_paths=None):
+            pass
+
+    service.preferences = PreferencesRecorder()
+    service.settings = SimpleNamespace()
+    calls: list[tuple] = []
+    done = threading.Event()
+
+    def observation(candidate_model, obs_settings, *, verdict, comment):
+        calls.append((verdict, comment))
+        done.set()
+        return {"garment_type": "cardigan", "silhouette_and_cut": "deep V-neck"}
+
+    monkeypatch.setattr(CandidateService, "_get_settings_state", staticmethod(lambda candidate_model: object()))
+    monkeypatch.setattr(service, "_observation_settings", lambda session, db_settings: object())
+    monkeypatch.setattr(service, "_compute_candidate_observation", observation)
+
+    with factory() as session:
+        session.add(Search(id="s1", name="Search", clothing_item="hosen", queries=["q"], region="de", enabled=True))
+        candidate = _candidate("candidate-1", created_at=datetime.now(UTC))
+        candidate.feedback = "dislike"
+        candidate.ai_observation = {"garment_type": "cardigan"}
+        session.add(candidate)
+        session.commit()
+
+    service.apply_note("candidate-1", comment="zu weiter Kragen")
+    assert done.wait(timeout=5)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        with factory() as session:
+            if session.get(Candidate, "candidate-1").ai_observation.get("silhouette_and_cut"):
+                break
+        time.sleep(0.02)
+
+    assert calls == [("dislike", "zu weiter Kragen")]
+    with factory() as session:
+        assert session.get(Candidate, "candidate-1").ai_observation["silhouette_and_cut"] == "deep V-neck"
+
+    service.apply_feedback("candidate-1", verdict="dislike", comment="zu weiter Kragen")
+    time.sleep(0.2)
+    assert len(calls) == 1

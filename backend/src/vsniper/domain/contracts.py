@@ -14,6 +14,8 @@ AiProvider = Literal["openai", "cerebras", "local", "openrouter"]
 TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note"]
 ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
 
+# A verified listing alerts at this verifier score: the profile rubric's "worth an alert" band starts at 81.
+VERIFY_ALERT_THRESHOLD = 80
 # Photos of one listing sent to the judge, each as its own image input. Vinted allows 20 per listing.
 # The local 2B judge ranks best from the main photo alone: each extra photo compresses its scores.
 JUDGE_MAX_PHOTOS = 1
@@ -307,6 +309,9 @@ class ScoreTrace(BaseModel):
     prompt_version: int | None = None
     judged_at: datetime | None = None
     raw_response: dict = Field(default_factory=dict)
+    # Set when a verifier re-judged a shortlisted listing: the local judge's score and model.
+    screen_score: int | None = None
+    screen_model: str | None = None
 
 
 class CandidateFeature(BaseModel):
@@ -443,6 +448,8 @@ class SettingsSnapshot(BaseModel):
     judge_fallback_model_id: str | None = None
     learn_model_id: str | None = None
     observation_model_id: str | None = None
+    verify_model_id: str | None = None
+    verify_alert_threshold: int = VERIFY_ALERT_THRESHOLD
     models: list[AiModelConfig] = Field(default_factory=list)
     vlm_judge_parallel_requests: int = 1
     ai_judge_image_max_px: int = JUDGE_IMAGE_MAX_PX
@@ -728,6 +735,8 @@ class SettingsUpdate(BaseModel):
     judge_fallback_model_id: str | None = None
     learn_model_id: str | None = None
     observation_model_id: str | None = None
+    verify_model_id: str | None = None
+    verify_alert_threshold: int | None = Field(default=None, ge=1, le=100)
     vlm_judge_parallel_requests: int | None = None
     ai_judge_image_max_px: int | None = None
     ai_judge_max_photos: int | None = Field(default=None, ge=1, le=JUDGE_MAX_PHOTOS_LIMIT)
@@ -813,6 +822,8 @@ class LabeledExample(BaseModel):
     description: str = ""
     user_comment: str = ""
     observation: ReferenceObservation | None = None
+    # The judge's score for this listing when it was rated; None for wardrobe photos.
+    judge_score: int | None = None
 
 
 class BackupManifestFileEntry(BaseModel):

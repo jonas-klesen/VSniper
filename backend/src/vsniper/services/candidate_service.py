@@ -118,7 +118,12 @@ class CandidateService:
         )
 
     def _compute_candidate_observation(
-        self, candidate_model: Candidate, obs_settings: _ObservationSettings
+        self,
+        candidate_model: Candidate,
+        obs_settings: _ObservationSettings,
+        *,
+        verdict: Literal["like", "dislike"] | None,
+        comment: str,
     ) -> dict | None:
         """Run a structured observation on the candidate image, returning the JSON payload.
 
@@ -126,8 +131,6 @@ class CandidateService:
         not held across the (slow) call. `candidate_model` may be detached (its columns were
         eagerly loaded; `expire_on_commit=False` keeps them readable). Best-effort: failures are
         logged and return None instead of blocking feedback recording."""
-        if candidate_model.ai_observation:
-            return None
         image = self._load_candidate_image_bytes(candidate_model)
         if image is None:
             return None
@@ -144,6 +147,8 @@ class CandidateService:
                 condition=condition,
                 description=str(norm.get("description") or ""),
                 clothing_item=cast(ClothingItem, candidate_model.clothing_item),
+                verdict=verdict,
+                user_comment=comment,
                 provider=obs_settings.provider,
                 model=obs_settings.model,
                 reasoning_effort=obs_settings.reasoning_effort,
@@ -346,11 +351,18 @@ class CandidateService:
             same_comment = cleaned_comment is None or cleaned_comment == current_comment
             if skip_if_unchanged and same_verdict and same_comment:
                 return candidate_to_contract(candidate_model), None
+            # The observation is the profile writer's only view of the photo. A new comment names
+            # what decided the vote, so the photo is described again with it.
+            new_comment = bool(cleaned_comment) and cleaned_comment != current_comment
             obs_settings = (
                 self._observation_settings(session, self._get_settings_state(candidate_model))
-                if not candidate_model.ai_observation
+                if not candidate_model.ai_observation or new_comment
                 else None
             )
+            effective_verdict = verdict or (
+                candidate_model.feedback if candidate_model.feedback in ("like", "dislike") else None
+            )
+            effective_comment = cleaned_comment if cleaned_comment is not None else current_comment
             candidate_image_urls = candidate_model.image_urls or []
             already_cached = self.preferences.existing_feedback_image_paths(
                 session, candidate_id=candidate_id
@@ -383,7 +395,7 @@ class CandidateService:
         if obs_settings is not None:
             threading.Thread(
                 target=self._apply_observation_in_background,
-                args=(candidate_model, obs_settings, stored_image_paths),
+                args=(candidate_model, obs_settings, stored_image_paths, effective_verdict, effective_comment),
                 name=f"feedback-observation-{candidate_id}",
                 daemon=True,
             ).start()
@@ -394,15 +406,19 @@ class CandidateService:
         candidate_model: Candidate,
         obs_settings: _ObservationSettings,
         stored_image_paths: list[str],
+        verdict: Literal["like", "dislike"] | None,
+        comment: str,
     ) -> None:
         try:
-            observation = self._compute_candidate_observation(candidate_model, obs_settings)
+            observation = self._compute_candidate_observation(
+                candidate_model, obs_settings, verdict=verdict, comment=comment
+            )
             if observation is None:
                 return
             with session_scope() as session:
                 candidate = session.get(Candidate, candidate_model.id)
-                # Another feedback or process may have filled it in meanwhile.
-                if candidate is None or candidate.ai_observation:
+                # A later comment may have started a newer description meanwhile; it wins.
+                if candidate is None or (candidate.feedback_comment or "").strip() != comment:
                     return
                 candidate.ai_observation = observation
                 # Refresh the taste sample so it carries the observation as learning evidence.

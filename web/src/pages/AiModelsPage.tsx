@@ -32,6 +32,8 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   judge_fallback_model_id: null,
   learn_model_id: null,
   observation_model_id: null,
+  verify_model_id: null,
+  verify_alert_threshold: 80,
   vlm_judge_parallel_requests: 1,
   ai_judge_image_max_px: 768,
   ai_judge_max_photos: 1,
@@ -76,6 +78,8 @@ export function AiModelsPage() {
       judge_fallback_model_id: settingsQuery.data.judge_fallback_model_id,
       learn_model_id: settingsQuery.data.learn_model_id,
       observation_model_id: settingsQuery.data.observation_model_id,
+      verify_model_id: settingsQuery.data.verify_model_id,
+      verify_alert_threshold: settingsQuery.data.verify_alert_threshold,
       vlm_judge_parallel_requests: settingsQuery.data.vlm_judge_parallel_requests,
       ai_judge_image_max_px: settingsQuery.data.ai_judge_image_max_px,
       ai_judge_max_photos: settingsQuery.data.ai_judge_max_photos,
@@ -282,6 +286,13 @@ export function AiModelsPage() {
                 onChange={(id) => setAiSetting('observation_model_id', id)}
                 helpText="Model used to describe wardrobe and offer reference photos."
               />
+              <ModelSelect
+                label="Verify model"
+                models={models}
+                value={aiSettings.verify_model_id}
+                onChange={(id) => setAiSetting('verify_model_id', id)}
+                allowNone
+              />
             </div>
           </section>
 
@@ -318,6 +329,16 @@ export function AiModelsPage() {
                   value={String(aiSettings.ai_judge_max_photos)}
                   normalize={(raw) => String(Math.max(1, Math.min(20, Math.round(parsePositiveNumber(raw, aiSettings.ai_judge_max_photos)))))}
                   onCommit={(normalized) => setAiSetting('ai_judge_max_photos', Number(normalized))}
+                />
+              </label>
+              <label>
+                Verified alert score
+                <DecimalInput
+                  type="text"
+                  inputMode="numeric"
+                  value={String(aiSettings.verify_alert_threshold)}
+                  normalize={(raw) => String(Math.max(1, Math.min(100, Math.round(parsePositiveNumber(raw, aiSettings.verify_alert_threshold)))))}
+                  onCommit={(normalized) => setAiSetting('verify_alert_threshold', Number(normalized))}
                 />
               </label>
             </div>

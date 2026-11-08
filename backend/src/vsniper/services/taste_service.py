@@ -745,6 +745,7 @@ class TasteService:
                     break
                 except Exception:
                     continue
+        score = ((sample.normalized_listing or {}).get("score_trace") or {}).get("score_10")
         return LabeledExample(
             candidate_id=sample.candidate_id or sample.id,
             clothing_item=cast(ClothingItem, sample.clothing_item),
@@ -754,6 +755,7 @@ class TasteService:
             description=sample.description or "",
             user_comment=sample.note or "",
             observation=observation,
+            judge_score=score if sample.kind != "wardrobe" and isinstance(score, int) else None,
         )
 
     @staticmethod
@@ -1005,7 +1007,12 @@ class TasteService:
             observation_detail = self.settings.ai_learn_image_detail
             samples = session.scalars(select(TasteSampleState).order_by(TasteSampleState.created_at.asc())).all()
             previous_profile = TasteProfile.model_validate(state.taste_profile) if state.taste_profile else None
-            image_inputs = self._sample_image_inputs(samples)
+            # Rated listings reach the profile writer as labelled examples with their own observation;
+            # only wardrobe photos are unlabelled references. A rated listing's photos are described
+            # only when it has no observation yet, as that example's fallback.
+            image_inputs = self._sample_image_inputs(
+                [s for s in samples if s.kind == "wardrobe" or self._sample_to_example(s).observation is None]
+            )
             samples_by_id = {sample.id: sample for sample in samples}
             liked_count = sum(1 for sample in samples if sample.kind in {"wardrobe", "offer_like"})
             disliked_count = sum(1 for sample in samples if sample.kind == "offer_dislike")
@@ -1081,7 +1088,7 @@ class TasteService:
             observations = [
                 observations_by_image_id[item.image_id]
                 for item in image_inputs
-                if item.image_id in observations_by_image_id
+                if item.image_id in observations_by_image_id and samples_by_id[item.sample_id].kind == "wardrobe"
             ]
             logger.info(
                 "taste recompute resolved reference observations count=%d fresh=%d duration=%.1fs",

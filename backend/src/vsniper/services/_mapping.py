@@ -321,6 +321,8 @@ def settings_to_contract(model: AppSettingsState, session: Session) -> SettingsS
             "judge_fallback_model_id": model.judge_fallback_model_id,
             "learn_model_id": model.learn_model_id,
             "observation_model_id": model.observation_model_id,
+            "verify_model_id": model.verify_model_id,
+            "verify_alert_threshold": model.verify_alert_threshold,
             "models": [
                 AiModelConfig.model_validate(
                     {

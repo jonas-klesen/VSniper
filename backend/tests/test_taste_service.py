@@ -17,7 +17,7 @@ from vsniper.db.models import (
     TasteSampleState,
     TasteState,
 )
-from vsniper.domain.contracts import TasteOfferCreate, TasteProfile
+from vsniper.domain.contracts import ReferenceObservation, TasteOfferCreate, TasteProfile
 from vsniper.services.taste_service import TasteService
 
 
@@ -340,3 +340,52 @@ def test_labeled_anchors_come_only_from_the_judged_clothing_item(monkeypatch, tm
 
     assert [anchor.title for anchor in liked] == ["old-hat-like"]
     assert [anchor.title for anchor in disliked] == ["old-hat-dislike"]
+
+
+def test_recompute_sends_only_wardrobe_photos_as_reference_observations(monkeypatch, tmp_path) -> None:
+    """Production 2026-11-08: every photo of every rated Vinted listing, disliked ones included,
+    was described with the "clothes they own and like" prompt and sent to the profile writer as
+    unlabelled reference observations (36 of 188 came from disliked listings). Rated listings
+    reach the writer as labelled examples; only wardrobe photos are references. The writer also
+    gets the judge score each rated listing had, so it can see which cues the judge missed."""
+    service = _setup(monkeypatch, tmp_path)
+    service.settings.ai_learn_image_detail = "high"
+    service.settings.ai_learn_observation_batch_size = 8
+    factory = service._test_factory
+    now = datetime.now(UTC)
+    _seed_recompute_prereqs(factory, job_id="job-A", taste_profile={}, now=now)
+    (tmp_path / "uploads").mkdir()
+    (tmp_path / "uploads" / "own.jpg").write_bytes(b"own-photo")
+    (tmp_path / "feedback-assets").mkdir()
+    (tmp_path / "feedback-assets" / "bad-0.jpg").write_bytes(b"disliked-photo")
+    observation = {"garment_type": "cardigan", "vibe_keywords": []}
+    with factory() as session:
+        session.add(TasteSampleState(id="own", kind="wardrobe", clothing_item="obenrum_kalt", title="own",
+                                     storage_path="own.jpg", created_at=now, updated_at=now))
+        session.add(TasteSampleState(
+            id="bad", kind="offer_dislike", clothing_item="obenrum_kalt", title="V-neck cardigan",
+            note="zu weiter Kragen", stored_image_paths=["bad-0.jpg"], created_at=now, updated_at=now,
+            normalized_listing={"ai_observation": {**observation, "clothing_item": "obenrum_kalt"},
+                                "score_trace": {"score_10": 90}},
+        ))
+        session.commit()
+
+    def describe(images, **kwargs):
+        return [ReferenceObservation(image_id=image_id, file_name=name, clothing_item=item, garment_type="x")
+                for image_id, name, _, item in images]
+
+    captured = {}
+
+    def build(**kwargs):
+        captured.update(kwargs)
+        return TasteProfile(summary="s", taste_prompt="p")
+
+    service.taste_client.describe_reference_images = describe
+    service.taste_client.build_taste_profile = build
+
+    service._run_recompute_unlocked("job-A")
+
+    assert [o.image_id for o in captured["observations"]] == ["own"]
+    [disliked] = captured["disliked_examples"]
+    assert (disliked.user_comment, disliked.judge_score) == ("zu weiter Kragen", 90)
+    assert [e.judge_score for e in captured["liked_examples"]] == [None]
