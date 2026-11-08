@@ -14,8 +14,9 @@ AiProvider = Literal["openai", "cerebras", "local", "openrouter"]
 TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note"]
 ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
 
-# A verified listing alerts at this verifier score: the profile rubric's "worth an alert" band starts at 81.
-VERIFY_ALERT_THRESHOLD = 80
+# A verified listing alerts at this verifier score. On 77 cross-validated rated listings, gpt-6.1-terra
+# kept 86% of likes at 75 and 71% at 80, with the same 96% precision.
+VERIFY_ALERT_THRESHOLD = 75
 # Photos of one listing sent to the judge, each as its own image input. Vinted allows 20 per listing.
 # The local 2B judge ranks best from the main photo alone: each extra photo compresses its scores.
 JUDGE_MAX_PHOTOS = 1

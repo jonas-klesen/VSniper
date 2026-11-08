@@ -23,7 +23,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     with op.batch_alter_table('app_settings', schema=None) as batch_op:
         batch_op.add_column(sa.Column('verify_model_id', sa.String(length=64), nullable=True))
-        batch_op.add_column(sa.Column('verify_alert_threshold', sa.Integer(), nullable=False, server_default='80'))
+        batch_op.add_column(sa.Column('verify_alert_threshold', sa.Integer(), nullable=False, server_default='75'))
 
 
 def downgrade() -> None:

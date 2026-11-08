@@ -33,7 +33,7 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   learn_model_id: null,
   observation_model_id: null,
   verify_model_id: null,
-  verify_alert_threshold: 80,
+  verify_alert_threshold: 75,
   vlm_judge_parallel_requests: 1,
   ai_judge_image_max_px: 768,
   ai_judge_max_photos: 1,
