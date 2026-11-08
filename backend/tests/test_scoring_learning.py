@@ -697,8 +697,8 @@ def test_ai_judgment_trace_keeps_human_score_and_prompt_metadata() -> None:
 
     assert trace.final_score == 0.8
     assert trace.score_10 == 80
-    assert trace.threshold == 0.95
-    assert trace.decision == "review"
+    assert trace.threshold == 0.8
+    assert trace.decision == "alert"
     assert trace.prompt_version == 3
     assert trace.labels == ["Cozy texture"]
 

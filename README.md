@@ -60,16 +60,16 @@ By default, the worker judges listings with a local vision model. It calls an
 OpenAI-compatible server at `LOCAL_VLM_BASE_URL`. The code default is
 `http://127.0.0.1:8080/v1`. `.env.example` uses
 `http://host.docker.internal:8080/v1`, so the Docker containers can reach a
-server on the host. VSniper sends `POST /v1/responses` with a JSON schema, so
-use a recent llama.cpp build.
+server on the host. The judge sends `POST /v1/chat/completions` with a JSON
+schema and logprobs, and scores each listing by the probability-weighted score
+token, so use a recent llama.cpp build.
 
 The local judge uses **LiquidAI LFM3-VL-2B Q4_0**, with its Q8_0 vision
 projector. Use llama.cpp v0.8.0 or newer:
 
 ```bash
 llama-server -hf LiquidAI/LFM3-VL-2B-GGUF:Q4_0 --alias lfm25-vl-clothing \
-  --host 0.0.0.0 --port 8080 --ctx-size 4096 --parallel 1 \
-  --image-min-tokens 64 --image-max-tokens 512 --reasoning off
+  --host 0.0.0.0 --port 8080 --ctx-size 16384 --parallel 2 --reasoning off
 ```
 
 - `-hf` downloads the model and its vision projector on the first start.
@@ -83,6 +83,17 @@ llama-server -hf LiquidAI/LFM3-VL-2B-GGUF:Q4_0 --alias lfm25-vl-clothing \
   variables only seed a new database. After that, change models on the
   **AI Models** page.
 
+- `--ctx-size 16384 --parallel 2` gives each request 8192 tokens; a judgment
+  with one 768 px photo uses about 2,700.
+
+The small local judge ranks listings well but misses decisive details. Listings
+whose local score reaches the search threshold are therefore judged again by a
+hosted verify model (`AI_VERIFY_MODEL`, default `gpt-6.1-terra`, with
+`AI_API_KEY`), and its score decides the alert. Only shortlisted listings are
+verified, at most 200 a day (about $0.40). Without a working verify model,
+shortlisted listings are held at review instead of alerting; set the verify
+model to none on the **AI Models** page to alert on local scores alone.
+
 To skip the local model, set `AI_JUDGE_PROVIDER=openai`. The judge then uses
 `AI_JUDGE_MODEL` with `AI_API_KEY`.
 
@@ -91,7 +102,7 @@ To skip the local model, set `AI_JUDGE_PROVIDER=openai`. The judge then uses
 1. Add wardrobe photos and assign each one to a clothing bucket.
 2. Write an optional taste note and recompute the taste profile.
 3. Review the generated search drafts and save the ones you want to run.
-4. Vote on candidates to improve the next recompute.
+4. Vote on candidates and add a short comment on why; comments weigh most in the next recompute.
 5. Send high-scoring matches to Telegram.
 
 ## Configuration

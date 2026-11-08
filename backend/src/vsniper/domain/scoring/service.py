@@ -4,12 +4,13 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from vsniper.domain.contracts import (
+    DEFAULT_ALERT_THRESHOLD,
     CandidateJudgment,
     ScoreTrace,
     TasteProfile,
 )
 
-DEFAULT_SCORE_ALERT_THRESHOLD = 95
+DEFAULT_SCORE_ALERT_THRESHOLD = DEFAULT_ALERT_THRESHOLD
 SCORE_REVIEW_THRESHOLD = 50
 
 

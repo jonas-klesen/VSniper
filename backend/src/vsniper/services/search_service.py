@@ -36,7 +36,9 @@ from vsniper.domain.contracts import (
     SessionHealth,
     SettingsSnapshot,
     SettingsUpdate,
+    DEFAULT_ALERT_THRESHOLD,
     VERIFY_ALERT_THRESHOLD,
+    VERIFY_DAILY_LIMIT,
     TasteProfile,
     VintedSizesResult,
 )
@@ -134,7 +136,25 @@ def _judge_request_concurrency(value: int) -> int:
     return max(1, min(16, int(value)))
 
 
-def _alert_threshold(value: int | None, *, fallback: int = 95) -> int:
+class _VerificationBudget:
+    """Verifier calls left today (None = unlimited) and this run's verification failures."""
+
+    def __init__(self, remaining: int | None) -> None:
+        self._remaining = remaining
+        self._lock = Lock()
+        self.failures: list[str] = []
+
+    def take(self) -> bool:
+        with self._lock:
+            if self._remaining is None:
+                return True
+            if self._remaining <= 0:
+                return False
+            self._remaining -= 1
+            return True
+
+
+def _alert_threshold(value: int | None, *, fallback: int = DEFAULT_ALERT_THRESHOLD) -> int:
     if value is None:
         value = fallback
     return max(1, min(100, int(value)))
@@ -591,6 +611,19 @@ class SearchService:
         )
 
     @staticmethod
+    def _verified_today(session: Session) -> int:
+        today = datetime.now(UTC).strftime("%Y-%m-%dT00:00:00")
+        return int(
+            session.scalar(
+                select(func.count())
+                .select_from(Candidate)
+                .where(func.json_extract(Candidate.score_trace, "$.screen_score").is_not(None))
+                .where(func.json_extract(Candidate.score_trace, "$.judged_at") >= today)
+            )
+            or 0
+        )
+
+    @staticmethod
     def _memoized_judgments(
         *,
         candidate_ids: list[str],
@@ -630,12 +663,19 @@ class SearchService:
             if verified and verify_model is None:
                 # Its score is on the verifier's scale; the local judge must score it again.
                 continue
-            if not verified and verify_model is not None and trace.score_10 >= alert_threshold:
-                # Shortlisted but never verified (a verifier failure or a newly lowered threshold).
+            if (
+                not verified
+                and verify_model is not None
+                and trace.verify_error is None
+                and trace.score_10 >= alert_threshold
+            ):
+                # Shortlisted after it was judged (a lowered threshold): judge and verify it now.
                 continue
             threshold = verify_alert_threshold if verified else alert_threshold
             if trace.threshold != round(threshold / 100, 3):
                 trace = retarget_judgment_trace(trace, alert_threshold=threshold)
+            if trace.verify_error is not None and trace.decision == "alert":
+                trace = trace.model_copy(update={"decision": "review"})
             reused[candidate_id] = trace
         return reused
 
@@ -654,6 +694,7 @@ class SearchService:
         cancel_check: Callable[[], bool] | None = None,
         verify_model: ResolvedAiModel | None = None,
         verify_alert_threshold: int = VERIFY_ALERT_THRESHOLD,
+        verify_budget: int | None = None,
     ) -> tuple[dict[str, ScoreTrace], dict[str, str], int, int]:
         traces: dict[str, ScoreTrace] = {}
         stages: dict[str, str] = {}
@@ -717,6 +758,7 @@ class SearchService:
             limit=5,
         )
         pending: list[CandidateImageInput] = []
+        verification = _VerificationBudget(verify_budget)
 
         if selected and cancel_check is not None and cancel_check():
             selected = []
@@ -785,6 +827,7 @@ class SearchService:
                             alert_threshold=search_record.effective_alert_threshold,
                             verify_model=verify_model,
                             verify_alert_threshold=verify_alert_threshold,
+                            verification=verification,
                         )
                         for item in group
                     ]
@@ -793,6 +836,18 @@ class SearchService:
                         traces[candidate_id] = trace
                         stages[candidate_id] = stage
                         _persist([candidate_id])
+        if verification.failures:
+            errors = getattr(self, "errors", None)
+            if errors is not None:
+                errors.record(
+                    source="candidate_judgment",
+                    operation="verify_judgment",
+                    summary="Shortlisted listings could not be verified and were held at review",
+                    message=verification.failures[0],
+                    details={"search_id": search_record.id, "failed": len(verification.failures)},
+                    related_entity_type="search",
+                    related_entity_id=search_record.id,
+                )
         if new_judged_ids is not None:
             new_judged_ids.update(
                 cid for cid, _ in selected if stages.get(cid) == "vlm_judged"
@@ -813,9 +868,10 @@ class SearchService:
         judge_image_detail: str,
         image_max_px: int = 512,
         on_usage: UsageCallback | None = None,
-        alert_threshold: int = 95,
+        alert_threshold: int = DEFAULT_ALERT_THRESHOLD,
         verify_model: ResolvedAiModel | None = None,
         verify_alert_threshold: int = VERIFY_ALERT_THRESHOLD,
+        verification: _VerificationBudget | None = None,
     ) -> tuple[str, ScoreTrace, str]:
         """Judge one listing, returning (candidate_id, trace, grading stage).
 
@@ -826,8 +882,9 @@ class SearchService:
         With a verify model, a listing whose local score reaches the search threshold is judged
         again by the verifier, whose score decides the alert against `verify_alert_threshold`. The
         small local judge ranks broadly well but misses decisive cues (a deep V-neck it names in its
-        own explanation); the verifier only sees the shortlist, so its cost stays bounded. A failed
-        verification keeps the local judgment, and the next run retries it.
+        own explanation); the verifier only sees the shortlist and a daily limit, so its cost stays
+        bounded. Without a verification (a failure or the limit reached) the listing keeps its local
+        score but is held at review: the local score alone is not trusted to alert.
         """
 
         def _failed(error: str) -> tuple[str, ScoreTrace, str]:
@@ -878,11 +935,26 @@ class SearchService:
         )
         if verify_model is None or judgment.score < alert_threshold:
             return item.candidate_id, trace, "vlm_judged"
+
+        def _held(reason: str) -> tuple[str, ScoreTrace, str]:
+            held = trace.model_copy(
+                update={
+                    "decision": "review" if trace.decision == "alert" else trace.decision,
+                    "verify_error": reason[:500],
+                    "summary": f"Not verified ({reason[:200]}). {trace.summary}",
+                }
+            )
+            return item.candidate_id, held, "vlm_judged"
+
+        verification = verification or _VerificationBudget(None)
+        if not verification.take():
+            return _held("daily verification limit reached")
         try:
             verified = _judge(verify_model)
-        except (OpenAIIntegrationError, UnidentifiedImageError, OSError):
-            _logger.warning("verification failed for candidate %s; keeping the local judgment", item.candidate_id, exc_info=True)
-            return item.candidate_id, trace, "vlm_judged"
+        except (OpenAIIntegrationError, UnidentifiedImageError, OSError) as exc:
+            _logger.warning("verification failed for candidate %s", item.candidate_id, exc_info=True)
+            verification.failures.append(str(exc))
+            return _held(str(exc))
         verified_trace = build_judgment_trace(
             judgment=verified,
             taste_profile=taste_profile,
@@ -954,6 +1026,7 @@ class SearchService:
             judge_model = resolve_ai_model(session, db_settings.judge_model_id)
             judge_fallback_model = resolve_ai_model(session, db_settings.judge_fallback_model_id)
             verify_model = resolve_ai_model(session, db_settings.verify_model_id)
+            verify_budget = max(0, VERIFY_DAILY_LIMIT - self._verified_today(session)) if verify_model else None
             if judge_model is None:
                 raise SearchNotConfigured("No judge model is configured. Set one on the Settings page.")
             search_record = search_to_record(search, default_alert_threshold=db_settings.alert_threshold)
@@ -1032,6 +1105,7 @@ class SearchService:
                 cancel_check=_check_cancel,
                 verify_model=verify_model,
                 verify_alert_threshold=db_settings.verify_alert_threshold,
+                verify_budget=verify_budget,
             )
             if mode == "live":
                 self._refresh_claim(search_id)

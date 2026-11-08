@@ -22,6 +22,7 @@ from vsniper.db.models import (
     TasteState,
 )
 from vsniper.domain.contracts import (
+    DEFAULT_ALERT_THRESHOLD,
     AiModelConfig,
     CandidateRecord,
     CLOTHING_ITEM_LABELS,
@@ -172,14 +173,14 @@ def timestamp_to_datetime(value: int | None) -> datetime | None:
     return datetime.fromtimestamp(value, UTC)
 
 
-def _coerce_alert_threshold(value: int | None, *, fallback: int = 95) -> int:
+def _coerce_alert_threshold(value: int | None, *, fallback: int = DEFAULT_ALERT_THRESHOLD) -> int:
     if value is None:
         value = fallback
     parsed = int(value)
     return max(1, min(100, parsed))
 
 
-def search_to_record(model: Search, *, default_alert_threshold: int = 95) -> SearchRecord:
+def search_to_record(model: Search, *, default_alert_threshold: int = DEFAULT_ALERT_THRESHOLD) -> SearchRecord:
     effective_alert_threshold = _coerce_alert_threshold(
         model.alert_threshold,
         fallback=_coerce_alert_threshold(default_alert_threshold),
@@ -341,7 +342,7 @@ def settings_to_contract(model: AppSettingsState, session: Session) -> SettingsS
             "vlm_judge_parallel_requests": model.vlm_judge_parallel_requests,
             "ai_judge_image_max_px": model.ai_judge_image_max_px,
             "ai_judge_max_photos": model.ai_judge_max_photos,
-            "alert_threshold": _coerce_alert_threshold(getattr(model, "alert_threshold", 95)),
+            "alert_threshold": _coerce_alert_threshold(getattr(model, "alert_threshold", DEFAULT_ALERT_THRESHOLD)),
             "scan_interval_seconds": getattr(model, "scan_interval_seconds", 1800),
             "blocked_brands": list(model.blocked_brands or []),
             "session_health": model.session_health or build_session_health(region=model.vinted_region).model_dump(mode="json"),

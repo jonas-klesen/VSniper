@@ -201,6 +201,7 @@ export type ScoreTrace = {
   prompt_version?: number | null;
   screen_score?: number | null;
   screen_model?: string | null;
+  verify_error?: string | null;
   judged_at?: string | null;
   raw_response: Record<string, unknown>;
 };

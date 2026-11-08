@@ -86,7 +86,7 @@ The six `ClothingItem` values are `schuhe`, `hosen`, `obenrum_warm`, `obenrum_mi
 
 Taste recompute builds an item profile and generated search per bucket. Same-bucket evidence is strongest; `cross_item_influence` carries broader style signals between buckets. Feedback is accumulated as evidence for a later recompute, not applied as an immediate weight adjustment.
 
-Candidate judgments use integer scores from 1–100. The default alert threshold is 95 and may be overridden per search; scores from 50 up to the alert threshold are `review`, and lower scores are `discard`. Failed judgments produce discard traces.
+Candidate judgments use integer scores from 1–100. The default alert threshold is 80 (the local judge's scores compress into roughly 70-87) and may be overridden per search; scores from 50 up to the alert threshold are `review`, and lower scores are `discard`. Failed judgments produce discard traces.
 
 Candidates without a reusable current-profile trace go through vision judging, one request per listing; the local judge scores by the expected value of the score token. With a verify model configured, a listing whose local score reaches the search threshold is judged again by that model, and its score decides the alert against the verified alert score (default 75); a failed verification keeps the local judgment and is retried. Failed or stale-profile judgments are retried. Keep output structured and explainable, including the score, explanation, labels, and concerns.
 

@@ -7,6 +7,7 @@ that must not take its neighbours down with it.
 from __future__ import annotations
 
 import threading
+from datetime import timedelta
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
@@ -958,26 +959,53 @@ def test_shortlisted_listings_are_verified_and_the_verifier_decides_the_alert() 
     assert set(stages.values()) == {"vlm_judged"}
 
 
-def test_failed_verification_keeps_the_local_judgment_and_retries_next_run(memo_db) -> None:
+def test_failed_verification_holds_the_alert_and_is_not_rejudged(memo_db) -> None:
+    """Without a working verifier (no API key, exhausted credits, a moderation false positive) the
+    local score alone must not alert, the listing must not be re-judged on every run, and the
+    failures surface as one error per run rather than one per listing."""
     service = _make_service()
+    service.errors = MagicMock()
     search = _search().model_copy(update={"alert_threshold": 80, "effective_alert_threshold": 80})
     taste = TasteProfile(summary="", taste_prompt="likes vintage")
-    judge, _ = _cascade_judge({"flagged": 88}, {"flagged": OpenAIIntegrationError("flagged by moderation")})
+    failure = OpenAIIntegrationError("insufficient credits")
+    judge, _ = _cascade_judge({"a": 88, "b": 90}, {"a": failure, "b": failure})
     service.taste_client.judge_candidate.side_effect = judge
 
-    traces, stages = _judge_with_cascade(
-        service, [_raw("1", title="flagged")], search, taste, verify_model=VERIFIER, verify_alert_threshold=85
+    traces, _ = _judge_with_cascade(
+        service, [_raw("1", title="a"), _raw("2", title="b")], search, taste,
+        verify_model=VERIFIER, verify_alert_threshold=75,
     )
 
     trace = traces["search-001:1"]
-    assert (trace.score_10, trace.decision, trace.screen_score, stages["search-001:1"]) == (88, "alert", None, "vlm_judged")
+    assert (trace.score_10, trace.decision, trace.screen_score) == (88, "review", None)
+    assert "insufficient credits" in (trace.verify_error or "")
+    assert service.errors.record.call_count == 1
+    assert service.errors.record.call_args.kwargs["details"]["failed"] == 2
 
     _seed_judged_candidate(memo_db, "search-001:1", trace)
     reused = service._memoized_judgments(
         candidate_ids=["search-001:1"], profile_version=taste.version, alert_threshold=80,
-        verify_model=VERIFIER, verify_alert_threshold=85,
+        verify_model=VERIFIER, verify_alert_threshold=75,
     )
-    assert reused == {}
+    assert reused["search-001:1"].decision == "review"
+
+
+def test_daily_verification_limit_bounds_the_verifier_calls() -> None:
+    service = _make_service()
+    service.errors = MagicMock()
+    search = _search().model_copy(update={"alert_threshold": 80, "effective_alert_threshold": 80})
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    judge, calls = _cascade_judge({"a": 88, "b": 90}, {"a": 91, "b": 92})
+    service.taste_client.judge_candidate.side_effect = judge
+
+    traces, _ = _judge_with_cascade(
+        service, [_raw("1", title="a"), _raw("2", title="b")], search, taste,
+        verify_model=VERIFIER, verify_alert_threshold=75, verify_budget=1,
+    )
+
+    assert sum(model == "gpt-verify" for model, _ in calls) == 1
+    decisions = sorted((t.decision, t.verify_error is not None) for t in traces.values())
+    assert decisions == [("alert", False), ("review", True)]
 
 
 def test_memoized_verified_judgment_keeps_the_verified_threshold(memo_db) -> None:
@@ -1007,3 +1035,18 @@ def test_memoized_verified_judgment_keeps_the_verified_threshold(memo_db) -> Non
     assert with_verifier["search-001:2"].decision == "review"
     # Without a verifier the stored verified score is on another scale: judge the listing again.
     assert set(without_verifier) == {"search-001:2"}
+
+
+def test_verified_today_counts_only_todays_verified_judgments(memo_db) -> None:
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    base = build_judgment_trace(
+        judgment=CandidateJudgment(score=90, explanation="x", labels=[], concerns=[]),
+        taste_profile=taste, model="gpt-verify", alert_threshold=75,
+    )
+    _seed_judged_candidate(memo_db, "search-001:1", base.model_copy(update={"screen_score": 85}))
+    yesterday = base.judged_at - timedelta(days=1)
+    _seed_judged_candidate(memo_db, "search-001:2", base.model_copy(update={"screen_score": 85, "judged_at": yesterday}))
+    _seed_judged_candidate(memo_db, "search-001:3", base)
+
+    with memo_db() as session:
+        assert SearchService._verified_today(session) == 1

@@ -14,9 +14,15 @@ AiProvider = Literal["openai", "cerebras", "local", "openrouter"]
 TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note"]
 ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
 
+# Default search threshold on the local judge's score. Its expected-value scores compress into
+# roughly 70-87, so the old default of 95 shortlisted nothing; 80 catches the top of that range.
+DEFAULT_ALERT_THRESHOLD = 80
 # A verified listing alerts at this verifier score. On 77 cross-validated rated listings, gpt-6.1-terra
 # kept 86% of likes at 75 and 71% at 80, with the same 96% precision.
 VERIFY_ALERT_THRESHOLD = 75
+# Verifier calls per UTC day across all searches (about $0.40 with gpt-6.1-terra); beyond it,
+# shortlisted listings are held at review. Concurrent runs may overshoot it by a few calls.
+VERIFY_DAILY_LIMIT = 200
 # Photos of one listing sent to the judge, each as its own image input. Vinted allows 20 per listing.
 # The local 2B judge ranks best from the main photo alone: each extra photo compresses its scores.
 JUDGE_MAX_PHOTOS = 1
@@ -84,7 +90,7 @@ class SearchRecord(BaseModel):
     region: str
     filters: list[SearchFilter] = Field(default_factory=list)
     alert_threshold: int | None = None
-    effective_alert_threshold: int = 95
+    effective_alert_threshold: int = DEFAULT_ALERT_THRESHOLD
     last_run_at: datetime | None = None
     last_found_count: int = 0
     last_fetched_count: int = 0
@@ -313,6 +319,8 @@ class ScoreTrace(BaseModel):
     # Set when a verifier re-judged a shortlisted listing: the local judge's score and model.
     screen_score: int | None = None
     screen_model: str | None = None
+    # Why a shortlisted listing kept its unverified local score; it is held at review, not alerted.
+    verify_error: str | None = None
 
 
 class CandidateFeature(BaseModel):
@@ -455,7 +463,7 @@ class SettingsSnapshot(BaseModel):
     vlm_judge_parallel_requests: int = 1
     ai_judge_image_max_px: int = JUDGE_IMAGE_MAX_PX
     ai_judge_max_photos: int = JUDGE_MAX_PHOTOS
-    alert_threshold: int = 95
+    alert_threshold: int = DEFAULT_ALERT_THRESHOLD
     scan_interval_seconds: int = 1800
     blocked_brands: list[str] = Field(default_factory=list)
     session_health: SessionHealth
