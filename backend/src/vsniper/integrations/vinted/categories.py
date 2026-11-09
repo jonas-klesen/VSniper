@@ -60,7 +60,7 @@ SIZE_GROUP_KEYWORDS_BY_CLOTHING_ITEM: dict[ClothingItem, list[str]] = {
     "kopf": ["hut", "huete", "muetze"],
     "obenrum_warm": ["hemd", "shirt", "kleidergroesse"],
     "obenrum_mittel": ["hemd", "shirt", "kleidergroesse"],
-    "obenrum_kalt": ["jacke", "pullover", "kleidergroesse"],
+    "obenrum_kalt": ["pullover", "kleidergroesse"],
     "jacken": ["jacke", "mantel", "maentel", "kleidergroesse"],
 }
 
