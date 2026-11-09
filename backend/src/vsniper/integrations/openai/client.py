@@ -132,8 +132,8 @@ TASTE_PROFILE_SCHEMA: dict[str, Any] = {
         "transparency_labels": STRING_ARRAY_SCHEMA,
         "item_profiles": {
             "type": "array",
-            "minItems": 6,
-            "maxItems": 6,
+            "minItems": len(CLOTHING_ITEM_ENUM),
+            "maxItems": len(CLOTHING_ITEM_ENUM),
             "items": {
                 "type": "object",
                 "additionalProperties": False,

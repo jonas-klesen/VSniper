@@ -1085,6 +1085,9 @@ def test_taste_recompute_uses_large_output_caps() -> None:
     search_schema = captured[1]["text"]["format"]["schema"]["properties"]["item_profiles"]["items"]["properties"]["generated_search"]
     assert "filters" not in search_schema["properties"]
     assert search_schema["properties"]["queries"]["type"] == "array"
+    # One profile per bucket: a hard-coded count of six made the model drop Kopf once Jacken was added.
+    item_profiles_schema = captured[1]["text"]["format"]["schema"]["properties"]["item_profiles"]
+    assert item_profiles_schema["minItems"] == item_profiles_schema["maxItems"] == len(CLOTHING_ITEM_LABELS)
     for draft in profile.generated_searches:
         assert draft.queries == ["cargo hose", "baggy jeans"]
         assert draft.filters == [default_category_filter_for_clothing_item(draft.clothing_item)]
