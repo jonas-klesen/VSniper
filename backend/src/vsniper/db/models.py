@@ -328,3 +328,4 @@ Index(
 Index("ix_alert_deliveries_status", AlertDeliveryState.status)
 Index("ix_candidates_decision", Candidate.decision)
 Index("ix_candidates_search_extraction", Candidate.search_id, Candidate.extraction_status)
+Index("ix_worker_activity_heartbeat", WorkerActivityState.heartbeat_at)
