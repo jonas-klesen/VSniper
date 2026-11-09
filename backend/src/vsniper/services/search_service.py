@@ -1102,7 +1102,10 @@ class SearchService:
             db_settings = self._get_settings_state(session)
             judge_model = resolve_ai_model(session, db_settings.judge_model_id)
             judge_fallback_model = resolve_ai_model(session, db_settings.judge_fallback_model_id)
-            verify_model = resolve_ai_model(session, db_settings.verify_model_id)
+            # Verification off: the local judge's score alone decides the alert.
+            verify_model = (
+                resolve_ai_model(session, db_settings.verify_model_id) if db_settings.verify_enabled else None
+            )
             verify_budget = max(0, VERIFY_DAILY_LIMIT - self._verified_today(session)) if verify_model else None
             if judge_model is None:
                 raise SearchNotConfigured("No judge model is configured. Set one on the Settings page.")
@@ -1683,6 +1686,8 @@ class SearchService:
                 model.learn_model_id = payload.learn_model_id or None
             if payload.observation_model_id is not None:
                 model.observation_model_id = payload.observation_model_id or None
+            if payload.verify_enabled is not None:
+                model.verify_enabled = payload.verify_enabled
             if payload.verify_model_id is not None:
                 model.verify_model_id = payload.verify_model_id or None
             if payload.verify_alert_threshold is not None:

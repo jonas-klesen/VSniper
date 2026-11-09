@@ -490,7 +490,7 @@ export function DashboardPage() {
             <li><strong>Judge fallback model:</strong> {modelLabel(settings.models, settings.judge_fallback_model_id)}</li>
             <li><strong>Learn model:</strong> {modelLabel(settings.models, settings.learn_model_id)}</li>
             <li><strong>Observation model:</strong> {modelLabel(settings.models, settings.observation_model_id)}</li>
-            <li><strong>Verify model:</strong> {modelLabel(settings.models, settings.verify_model_id)}</li>
+            <li><strong>Verify model:</strong> {settings.verify_enabled ? modelLabel(settings.models, settings.verify_model_id) : 'off'}</li>
             <li><strong>Vinted credentials:</strong> {settings.vinted_configured ? 'present' : 'missing'}</li>
             <li><strong>Telegram credentials:</strong> {settings.telegram_configured ? 'present' : 'missing'}</li>
             <li><strong>Judge:</strong> {settings.judge_configured ? 'ready' : 'missing config'}</li>

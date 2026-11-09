@@ -365,6 +365,7 @@ export type SettingsSnapshot = {
   judge_fallback_model_id: string | null;
   learn_model_id: string | null;
   observation_model_id: string | null;
+  verify_enabled: boolean;
   verify_model_id: string | null;
   verify_alert_threshold: number;
   models: AiModelConfig[];

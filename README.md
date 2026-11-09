@@ -95,8 +95,8 @@ whose local score reaches the search threshold are therefore judged again by a
 hosted verify model (`AI_VERIFY_MODEL`, default `gpt-6.1-terra`, with
 `AI_API_KEY`), and its score decides the alert. Only shortlisted listings are
 verified, at most 200 a day (about $0.40). Without a working verify model,
-shortlisted listings are held at review instead of alerting; set the verify
-model to none on the **AI Models** page to alert on local scores alone.
+shortlisted listings are held at review instead of alerting. Clear **Verify
+shortlisted listings** on the **AI Models** page to alert on local scores alone.
 
 To skip the local model, set `AI_JUDGE_PROVIDER=openai`. The judge then uses
 `AI_JUDGE_MODEL` with `AI_API_KEY`.

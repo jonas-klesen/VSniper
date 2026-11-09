@@ -183,6 +183,7 @@ class AppSettingsState(Base):
     judge_fallback_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     learn_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     observation_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     verify_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     verify_alert_threshold: Mapped[int] = mapped_column(Integer, default=VERIFY_ALERT_THRESHOLD, nullable=False)
     vlm_judge_parallel_requests: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

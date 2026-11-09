@@ -32,6 +32,7 @@ const EMPTY_AI_SETTINGS: AiModelSettingsSavePayload = {
   judge_fallback_model_id: null,
   learn_model_id: null,
   observation_model_id: null,
+  verify_enabled: true,
   verify_model_id: null,
   verify_alert_threshold: 75,
   vlm_judge_parallel_requests: 1,
@@ -78,6 +79,7 @@ export function AiModelsPage() {
       judge_fallback_model_id: settingsQuery.data.judge_fallback_model_id,
       learn_model_id: settingsQuery.data.learn_model_id,
       observation_model_id: settingsQuery.data.observation_model_id,
+      verify_enabled: settingsQuery.data.verify_enabled,
       verify_model_id: settingsQuery.data.verify_model_id,
       verify_alert_threshold: settingsQuery.data.verify_alert_threshold,
       vlm_judge_parallel_requests: settingsQuery.data.vlm_judge_parallel_requests,
@@ -293,6 +295,14 @@ export function AiModelsPage() {
                 onChange={(id) => setAiSetting('verify_model_id', id)}
                 allowNone
               />
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={aiSettings.verify_enabled}
+                  onChange={(e) => setAiSetting('verify_enabled', e.target.checked)}
+                />
+                Verify shortlisted listings
+              </label>
             </div>
           </section>
 

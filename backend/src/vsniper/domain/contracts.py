@@ -457,6 +457,7 @@ class SettingsSnapshot(BaseModel):
     judge_fallback_model_id: str | None = None
     learn_model_id: str | None = None
     observation_model_id: str | None = None
+    verify_enabled: bool = True
     verify_model_id: str | None = None
     verify_alert_threshold: int = VERIFY_ALERT_THRESHOLD
     models: list[AiModelConfig] = Field(default_factory=list)
@@ -744,6 +745,7 @@ class SettingsUpdate(BaseModel):
     judge_fallback_model_id: str | None = None
     learn_model_id: str | None = None
     observation_model_id: str | None = None
+    verify_enabled: bool | None = None
     verify_model_id: str | None = None
     verify_alert_threshold: int | None = Field(default=None, ge=1, le=100)
     vlm_judge_parallel_requests: int | None = None

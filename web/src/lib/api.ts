@@ -46,6 +46,7 @@ type SettingsUpdatePayload = {
   judge_fallback_model_id: string | null;
   learn_model_id: string | null;
   observation_model_id: string | null;
+  verify_enabled: boolean;
   verify_model_id: string | null;
   verify_alert_threshold: number;
   vlm_judge_parallel_requests: number;
@@ -61,6 +62,7 @@ export type SettingsSavePayload = Omit<
   | 'judge_fallback_model_id'
   | 'learn_model_id'
   | 'observation_model_id'
+  | 'verify_enabled'
   | 'verify_model_id'
   | 'verify_alert_threshold'
   | 'vlm_judge_parallel_requests'
@@ -78,6 +80,7 @@ export type AiModelSettingsSavePayload = Pick<
   | 'judge_fallback_model_id'
   | 'learn_model_id'
   | 'observation_model_id'
+  | 'verify_enabled'
   | 'verify_model_id'
   | 'verify_alert_threshold'
   | 'vlm_judge_parallel_requests'

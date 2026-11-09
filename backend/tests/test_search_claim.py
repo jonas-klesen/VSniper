@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from vsniper.core.database import Base
 from vsniper.db.models import AiModelConfig, AppSettingsState, Candidate, Search, SearchRun
-from vsniper.domain.contracts import ScoreTrace, SearchFilter, SearchRecord, SearchRunResult, SearchUpdate, TasteProfile
+from vsniper.domain.contracts import ScoreTrace, SearchFilter, SearchRecord, SearchRunResult, SearchUpdate, SettingsUpdate, TasteProfile
 from vsniper.integrations.vinted.client import VintedSessionError
 from vsniper.integrations.vinted.categories import default_category_filter_for_clothing_item
 from vsniper.services._mapping import as_aware, build_session_health, candidate_to_contract
@@ -896,3 +896,39 @@ def test_cancelled_run_persists_partial_results_and_closes_run(monkeypatch, tmp_
     assert candidate is not None
     assert candidate.decision == "alert"
     session.close()
+
+
+def test_switching_verification_off_judges_with_the_local_judge_only(monkeypatch, tmp_path) -> None:
+    service, factory = _setup(monkeypatch, tmp_path)
+    _wire_run(service, factory, run_search=lambda *args, **kwargs: [_raw_candidate()])
+    now = datetime.now(UTC)
+    with _session_scope_of(factory) as session:
+        session.add(
+            AiModelConfig(
+                id="model-verifier",
+                provider="openai",
+                model_name="gpt-verifier",
+                reasoning_effort="low",
+                local_base_url=None,
+                display_name="gpt-verifier (Openai) · low",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    service.update_app_settings(SettingsUpdate(vinted_region="de", verify_model_id="model-verifier"))
+    verifiers: list[str | None] = []
+
+    def fake_judge(raw_candidates, search_record, taste_profile, db_settings, manual_note="", on_usage=None, **kwargs):
+        verify_model = kwargs["verify_model"]
+        verifiers.append(verify_model.model_name if verify_model else None)
+        return {}, {}, 0, 0
+
+    service._judge_candidates = fake_judge
+
+    service._run("s1", mode="preview")
+    snapshot = service.update_app_settings(SettingsUpdate(vinted_region="de", verify_enabled=False))
+    service._run("s1", mode="preview")
+
+    assert verifiers == ["gpt-verifier", None]
+    assert snapshot.verify_enabled is False
+    assert snapshot.verify_model_id == "model-verifier"
