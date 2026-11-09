@@ -64,11 +64,13 @@ server on the host. The judge sends `POST /v1/chat/completions` with a JSON
 schema and logprobs, and scores each listing by the probability-weighted score
 token, so use a recent llama.cpp build.
 
-The local judge uses **LiquidAI LFM3-VL-2B Q4_0**, with its Q8_0 vision
-projector. Use llama.cpp v0.8.0 or newer:
+The local judge uses **Qwen3.5-4B Q4_K_M** with its vision projector. It
+ranked held-out ratings far better than LFM3-VL-2B and other small VLMs (AUC
+0.80 vs. 0.54-0.66), at about twice LFM3's time per listing and 5 GB of RAM.
+Use llama.cpp v0.8.0 or newer:
 
 ```bash
-llama-server -hf LiquidAI/LFM3-VL-2B-GGUF:Q4_0 --alias lfm25-vl-clothing \
+llama-server -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M --alias qwen35-4b-clothing \
   --host 0.0.0.0 --port 8080 --ctx-size 16384 --parallel 2 --reasoning off
 ```
 
@@ -78,10 +80,12 @@ llama-server -hf LiquidAI/LFM3-VL-2B-GGUF:Q4_0 --alias lfm25-vl-clothing \
 - Check the server with `curl http://127.0.0.1:8080/health`.
 - `--reasoning off` is required for direct structured judgments; default thinking
   can exhaust the output budget before producing JSON.
-- `lfm25-vl-clothing` is a retained compatibility alias, not the model version.
-  Both local model defaults use it. These
+- Both local model defaults use the `qwen35-4b-clothing` alias. These
   variables only seed a new database. After that, change models on the
-  **AI Models** page.
+  **AI Models** page. Switching the judge model re-judges stored listings.
+- Set **Parallel requests** (AI Models page) to the server's `--parallel` value. All
+  searches share that many requests, so none wait in the server past the
+  client timeout.
 
 - `--ctx-size 16384 --parallel 2` gives each request 8192 tokens; a judgment
   with one 768 px photo uses about 2,700.

@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from vsniper.core.database import Base
-from vsniper.db.models import Candidate
+from vsniper.db.models import AppSettingsState, Candidate, Search
 from vsniper.domain.contracts import (
     CandidateJudgment,
     ScoreTrace,
@@ -303,7 +303,7 @@ def test_already_judged_candidate_is_reused_not_rejudged(memo_db) -> None:
     prior = build_judgment_trace(
         judgment=CandidateJudgment(score=80, explanation="seen before", labels=[], concerns=[]),
         taste_profile=taste,
-        model="local",
+        model=_db_settings().judge_model.model_name,
     )
     _seed_judged_candidate(memo_db, "search-001:item-1", prior)
 
@@ -348,7 +348,7 @@ def test_threshold_change_reuses_memoized_score_with_new_decision(memo_db) -> No
     prior = build_judgment_trace(
         judgment=CandidateJudgment(score=80, explanation="old threshold", labels=[], concerns=[]),
         taste_profile=taste,
-        model="local",
+        model=_db_settings().judge_model.model_name,
         alert_threshold=95,
     )
     _seed_judged_candidate(memo_db, "search-001:item-1", prior)
@@ -1050,3 +1050,126 @@ def test_verified_today_counts_only_todays_verified_judgments(memo_db) -> None:
 
     with memo_db() as session:
         assert SearchService._verified_today(session) == 1
+
+
+def test_concurrent_runs_share_the_local_judge_slots() -> None:
+    """Production 2026-11-09: four concurrent search runs each sent the configured two parallel
+    requests to the two-slot local judge. Requests queued in the server past the 300 s client
+    timeout, the retries kept the abandoned work coming, and the local judge produced nothing for
+    eight hours. Requests to one local server must share its slot count across runs."""
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    jpeg = _jpeg()
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def _judge(**kwargs) -> CandidateJudgment:
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        threading.Event().wait(0.02)
+        with lock:
+            active -= 1
+        return CandidateJudgment(score=60, explanation="ok", labels=[], concerns=[])
+
+    def _download(*, candidate_id: str, image_urls: list[str]) -> CandidateImageInput:
+        return CandidateImageInput(candidate_id=candidate_id, image_bytes=jpeg)
+
+    def _run(search_id: str) -> None:
+        service = _make_service()
+        service.taste_client.judge_candidate.side_effect = _judge
+        with patch.object(service, "_download_candidate_image", side_effect=_download):
+            _call_judge(
+                service, [_raw(f"{search_id}-{i}") for i in range(8)], _search(search_id), taste,
+                _db_settings(vlm_judge_parallel_requests=2),
+            )
+
+    runs = [threading.Thread(target=_run, args=(f"search-{n}",)) for n in range(3)]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join()
+
+    assert max_active == 2
+
+
+def test_thresholds_changed_during_a_run_apply_to_its_later_decisions(memo_db) -> None:
+    """Production 2026-11-09: a run that started before the verified alert score was raised from
+    75 to 90 kept deciding with 75 for nine more hours and sent 89 alerts. Decisions use the
+    thresholds stored when the listing is judged, not those read when the run started."""
+    with memo_db() as session:
+        session.add(AppSettingsState(id=1, vinted_region="de", alert_threshold=80, verify_alert_threshold=90))
+        session.add(Search(id="search-001", name="Test", clothing_item="hosen", region="de", alert_threshold=84))
+        session.commit()
+    service = _make_service()
+    search = _search().model_copy(update={"alert_threshold": 80, "effective_alert_threshold": 80})
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    judge, calls = _cascade_judge({"short": 86, "below": 82}, {"short": 88})
+    service.taste_client.judge_candidate.side_effect = judge
+
+    traces, _ = _judge_with_cascade(
+        service, [_raw("1", title="short"), _raw("2", title="below")], search, taste,
+        verify_model=VERIFIER, verify_alert_threshold=75,
+    )
+
+    short, below = traces["search-001:1"], traces["search-001:2"]
+    assert (short.score_10, short.decision, short.threshold) == (88, "review", 0.9)
+    assert (below.score_10, below.decision, below.screen_score) == (82, "review", None)
+    assert [title for model, title in calls if model == "gpt-verify"] == ["short"]
+
+
+def test_rejudging_after_a_recompute_is_capped_per_run_and_new_listings_go_first(memo_db, monkeypatch) -> None:
+    """A taste recompute invalidates every stored judgment. Re-judging a search's few hundred
+    listings in one run kept that run going for nine hours, so new listings waited and the run held
+    stale settings. Each run judges every new listing first and only a bounded number of stale
+    ones; the rest keep their stored judgment until a later run."""
+    monkeypatch.setattr("vsniper.services.search_service.STALE_REJUDGES_PER_RUN", 1)
+    service = _make_service()
+    taste = TasteProfile(summary="", taste_prompt="likes vintage", version=2)
+    stale = build_judgment_trace(
+        judgment=CandidateJudgment(score=70, explanation="old profile", labels=[], concerns=[]),
+        taste_profile=TasteProfile(summary="", taste_prompt="x", version=1),
+        model="local",
+    )
+    for item in ("old-1", "old-2", "old-3"):
+        _seed_judged_candidate(memo_db, f"search-001:{item}", stale)
+    order: list[str] = []
+
+    def _judge(*, candidate: CandidateImageInput, **kwargs) -> CandidateJudgment:
+        order.append(candidate.candidate_id.split(":")[1])
+        return CandidateJudgment(score=40, explanation="current profile", labels=[], concerns=[])
+
+    service.taste_client.judge_candidate.side_effect = _judge
+    new_judged_ids: set[str] = set()
+    raws = [_raw("old-1"), _raw("new-1"), _raw("old-2"), _raw("new-2"), _raw("old-3")]
+    traces, _ = _judge_with_cascade(service, raws, _search(), taste, new_judged_ids=new_judged_ids)
+
+    assert order == ["new-1", "new-2", "old-1"]
+    assert set(traces) == {"search-001:new-1", "search-001:new-2", "search-001:old-1"}
+    assert new_judged_ids == set(traces)
+
+
+def test_switching_the_judge_model_rejudges_stored_judgments(memo_db) -> None:
+    """Scores from another judge model sit on another scale; reusing them would compare an old
+    model's score with thresholds tuned for the new one."""
+    service = _make_service()
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    db_settings = _db_settings()
+    for item, model in (("old", "retired-local-model"), ("same", db_settings.judge_model.model_name)):
+        _seed_judged_candidate(
+            memo_db,
+            f"search-001:{item}",
+            build_judgment_trace(
+                judgment=CandidateJudgment(score=70, explanation=model, labels=[], concerns=[]),
+                taste_profile=taste, model=model,
+            ),
+        )
+    service.taste_client.judge_candidate.return_value = CandidateJudgment(
+        score=40, explanation="current model", labels=[], concerns=[]
+    )
+
+    traces, _ = _judge_with_cascade(service, [_raw("old"), _raw("same")], _search(), taste)
+
+    assert traces["search-001:old"].score_10 == 40
+    assert traces["search-001:same"].score_10 == 70

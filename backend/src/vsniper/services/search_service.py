@@ -167,6 +167,26 @@ _logger = logging.getLogger(__name__)
 # request rate to Vinted's item pages browser-like.
 _LISTING_PAGE_FETCHES = BoundedSemaphore(2)
 
+# A local judge server has a fixed number of slots, shared by every concurrently running search.
+# Requests beyond them queue inside the server, where they outlive the client timeout; the retries
+# then keep the server busy with abandoned work. Callers wait for a slot here instead.
+_local_judge_slots: dict[str, tuple[int, BoundedSemaphore]] = {}
+_local_judge_slots_lock = Lock()
+
+# Listings judged under an older profile or another judge model that one run re-judges. After a
+# taste recompute or a judge switch every stored judgment is stale; without a cap one run re-judges
+# hundreds of listings for hours while new listings wait. Unjudged listings are never capped.
+STALE_REJUDGES_PER_RUN = 10
+
+
+def _local_judge_slot(base_url: str, slots: int) -> BoundedSemaphore:
+    with _local_judge_slots_lock:
+        current = _local_judge_slots.get(base_url)
+        if current is None or current[0] != slots:
+            current = (slots, BoundedSemaphore(slots))
+            _local_judge_slots[base_url] = current
+        return current[1]
+
 
 class SearchRunAlreadyClaimed(RuntimeError):
     """Raised when another API or worker process already owns the DB-backed run lease."""
@@ -631,6 +651,7 @@ class SearchService:
         alert_threshold: int,
         verify_model: ResolvedAiModel | None = None,
         verify_alert_threshold: int = VERIFY_ALERT_THRESHOLD,
+        judge_model_names: frozenset[str] | None = None,
     ) -> dict[str, ScoreTrace]:
         """Return stored VLM judgments still valid for the current taste-profile version.
 
@@ -660,6 +681,10 @@ class SearchService:
                 _logger.warning("could not reuse stored score trace for candidate %s", candidate_id)
                 continue
             verified = trace.screen_score is not None
+            judged_by = trace.screen_model if verified else trace.model
+            if judge_model_names is not None and judged_by not in judge_model_names:
+                # Another judge model's score is on another scale than the current thresholds.
+                continue
             if verified and verify_model is None:
                 # Its score is on the verifier's scale; the local judge must score it again.
                 continue
@@ -678,6 +703,36 @@ class SearchService:
                 trace = trace.model_copy(update={"decision": "review"})
             reused[candidate_id] = trace
         return reused
+
+    @staticmethod
+    def _previously_judged_ids(candidate_ids: list[str]) -> set[str]:
+        """Candidates that hold a VLM judgment, from any profile version or judge model."""
+        if not candidate_ids:
+            return set()
+        with session_scope() as session:
+            return set(
+                session.scalars(
+                    select(Candidate.id).where(
+                        Candidate.id.in_(candidate_ids), Candidate.grading_stage == "vlm_judged"
+                    )
+                )
+            )
+
+    @staticmethod
+    def _current_alert_thresholds(
+        search_id: str, *, alert_threshold: int, verify_alert_threshold: int
+    ) -> tuple[int, int]:
+        """The search's and the verified alert threshold as stored now.
+
+        A run can take hours; a threshold changed meanwhile applies to its remaining decisions.
+        """
+        with session_scope() as session:
+            settings = session.get(AppSettingsState, 1)
+            search = session.get(Search, search_id)
+            if settings is None or search is None:
+                return alert_threshold, verify_alert_threshold
+            record = search_to_record(search, default_alert_threshold=settings.alert_threshold)
+            return record.effective_alert_threshold, settings.verify_alert_threshold
 
     def _judge_candidates(
         self,
@@ -738,17 +793,25 @@ class SearchService:
             alert_threshold=search_record.effective_alert_threshold,
             verify_model=verify_model,
             verify_alert_threshold=verify_alert_threshold,
+            # Fallback judgments are a stopgap on another scale; the primary judge redoes them later.
+            judge_model_names=frozenset({judge_model.model_name}),
         )
-        selected: list[tuple[str, dict]] = []
+        unjudged: list[tuple[str, dict]] = []
+        stale: list[tuple[str, dict]] = []
         memoized_ids: list[str] = []
+        previously_judged = self._previously_judged_ids([cid for cid, _ in candidate_rows if cid not in memoized])
         for cid, raw in candidate_rows:
             cached_trace = memoized.get(cid)
             if cached_trace is not None:
                 traces[cid] = cached_trace
                 stages[cid] = "vlm_judged"
                 memoized_ids.append(cid)
+            elif cid in previously_judged:
+                stale.append((cid, raw))
             else:
-                selected.append((cid, raw))
+                unjudged.append((cid, raw))
+        # Stale listings left over keep their stored judgment until a later run re-judges them.
+        selected = unjudged + stale[:STALE_REJUDGES_PER_RUN]
         # Memoized candidates still need their listing fields (price, last_seen_at, ...) refreshed
         # even though their judgment is reused, so persist them like any other judged batch.
         _persist(memoized_ids)
@@ -805,10 +868,16 @@ class SearchService:
 
         if pending:
             judge_workers = min(len(pending), _judge_request_concurrency(db_settings.vlm_judge_parallel_requests))
+            alert_threshold = search_record.effective_alert_threshold
             for start in range(0, len(pending), judge_workers):
                 if cancel_check is not None and cancel_check():
                     break
                 group = pending[start : start + judge_workers]
+                alert_threshold, verify_alert_threshold = self._current_alert_thresholds(
+                    search_record.id,
+                    alert_threshold=alert_threshold,
+                    verify_alert_threshold=verify_alert_threshold,
+                )
                 with ThreadPoolExecutor(max_workers=len(group)) as pool:
                     futures = [
                         pool.submit(
@@ -824,10 +893,11 @@ class SearchService:
                             judge_image_detail=self.settings.ai_judge_image_detail,
                             image_max_px=db_settings.ai_judge_image_max_px,
                             on_usage=on_usage,
-                            alert_threshold=search_record.effective_alert_threshold,
+                            alert_threshold=alert_threshold,
                             verify_model=verify_model,
                             verify_alert_threshold=verify_alert_threshold,
                             verification=verification,
+                            local_slots=_judge_request_concurrency(db_settings.vlm_judge_parallel_requests),
                         )
                         for item in group
                     ]
@@ -872,6 +942,7 @@ class SearchService:
         verify_model: ResolvedAiModel | None = None,
         verify_alert_threshold: int = VERIFY_ALERT_THRESHOLD,
         verification: _VerificationBudget | None = None,
+        local_slots: int = 1,
     ) -> tuple[str, ScoreTrace, str]:
         """Judge one listing, returning (candidate_id, trace, grading stage).
 
@@ -894,6 +965,12 @@ class SearchService:
             return item.candidate_id, trace, "failed"
 
         def _judge(model: ResolvedAiModel) -> CandidateJudgment:
+            if model.provider == "local":
+                with _local_judge_slot(model.local_base_url or "", local_slots):
+                    return _request(model)
+            return _request(model)
+
+        def _request(model: ResolvedAiModel) -> CandidateJudgment:
             return self.taste_client.judge_candidate(
                 taste_profile=taste_profile,
                 candidate=item,

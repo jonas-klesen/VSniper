@@ -485,6 +485,40 @@ def test_local_judgment_ignores_the_word_score_inside_the_explanation() -> None:
     assert result.score == 15
 
 
+def test_local_judgment_scores_split_digit_tokens_by_expected_digits() -> None:
+    """Qwen-family tokenizers write a score as one token per digit. Reading the first digit as the
+    whole score turned 85 into 8; the expected score combines both digit positions."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        content = '{"explanation": "Bold knit.", "labels": [], "concerns": [], "score": 81}'
+        tokens = [
+            _logprob_token('{"'),
+            _logprob_token("explanation"),
+            _logprob_token('":'),
+            _logprob_token(' "Bold knit.", "labels": [], "concerns": [], "'),
+            _logprob_token("score"),
+            _logprob_token('":'),
+            _logprob_token(" "),
+            _logprob_token("8", {"8": 0.75, "2": 0.25, "x": 0.1}),
+            _logprob_token("1", {"1": 1.0}),
+            _logprob_token("}"),
+        ]
+        return _local_chat_response(content, tokens)
+
+    client = _mock_openai_client(handler)
+    result = client.judge_candidate(
+        taste_profile=TasteProfile(summary="", taste_prompt="likes bold textured clothes"),
+        candidate=CandidateImageInput(candidate_id="candidate-a", image_bytes=_jpeg_bytes("red")),
+        model="local-model",
+        reasoning_effort="low",
+        ai_judge_provider="local",
+        local_vlm_base_url="http://local-vlm.test/v1",
+    )
+
+    # 10 * (0.75 * 8 + 0.25 * 2) + 1 = 66
+    assert result.score == 66
+
+
 def test_local_judgment_keeps_sampled_score_without_logprobs() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         content = '{"explanation": "Fits.", "labels": [], "concerns": [], "score": 64}'

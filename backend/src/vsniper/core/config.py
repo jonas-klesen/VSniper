@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     )
     ai_judge_provider: str = Field(default="local", alias="AI_JUDGE_PROVIDER")
     ai_judge_model: str = Field(default="gpt-5.4-mini", alias="AI_JUDGE_MODEL")
-    local_judge_model: str = Field(default="lfm25-vl-clothing", alias="LOCAL_JUDGE_MODEL")
+    local_judge_model: str = Field(default="qwen35-4b-clothing", alias="LOCAL_JUDGE_MODEL")
     ai_judge_allow_openai_fallback: bool = Field(default=False, alias="AI_JUDGE_ALLOW_OPENAI_FALLBACK")
     ai_judge_fallback_provider: str = Field(default="none", alias="AI_JUDGE_FALLBACK_PROVIDER")
     cerebras_api_key: str = Field(default="put-your-cerebras-api-key-here", alias="CEREBRAS_API_KEY")
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # Re-judges listings the local judge shortlists; empty disables the cascade.
     ai_verify_model: str = Field(default="gpt-6.1-terra", alias="AI_VERIFY_MODEL")
     ai_verify_reasoning_effort: str = Field(default="low", alias="AI_VERIFY_REASONING_EFFORT")
-    local_observation_model: str = Field(default="lfm25-vl-clothing", alias="LOCAL_OBSERVATION_MODEL")
+    local_observation_model: str = Field(default="qwen35-4b-clothing", alias="LOCAL_OBSERVATION_MODEL")
     ai_learn_observation_batch_size: int = Field(default=15, alias="AI_LEARN_OBSERVATION_BATCH_SIZE")
     vlm_judge_parallel_requests: int = Field(default=1, alias="VLM_JUDGE_PARALLEL_REQUESTS")
     ai_api_key: str = Field(default="put-your-ai-key-here", alias="AI_API_KEY")

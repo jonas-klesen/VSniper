@@ -492,6 +492,22 @@ def _to_chat_completion_content(content: list[dict[str, Any]]) -> list[dict[str,
 
 _SCORE_KEY_TOKEN = re.compile(r'\s*"?score"?\s*')
 _SCORE_VALUE_TOKEN = re.compile(r"\s?(100|[1-9][0-9]?)")
+_SCORE_DIGIT_TOKEN = re.compile(r"\s?([0-9])")
+
+
+def _expected_value(token: dict[str, Any], pattern: re.Pattern[str]) -> float:
+    """Mean of the token's top alternatives that match `pattern`, renormalised over those."""
+    weights: dict[int, float] = {}
+    for alternative in token.get("top_logprobs") or []:
+        match = pattern.fullmatch(str(alternative.get("token") or ""))
+        if match:
+            value = int(match.group(1))
+            weights[value] = weights.get(value, 0.0) + math.exp(float(alternative.get("logprob", -math.inf)))
+    total = sum(weights.values())
+    if total:
+        return sum(value * weight for value, weight in weights.items()) / total
+    match = pattern.fullmatch(str(token.get("token") or ""))
+    return float(match.group(1)) if match else 0.0
 
 
 def _expected_scores(logprob_tokens: list[dict[str, Any]]) -> list[float]:
@@ -499,8 +515,9 @@ def _expected_scores(logprob_tokens: list[dict[str, Any]]) -> list[float]:
 
     A small judge spreads its belief over several rubric band edges (e.g. 81, 20, 61), and
     near-greedy sampling collapses that onto the single most likely edge for most listings. The
-    expected value keeps the model's uncertainty, which ranks listings far better. Each value
-    1-100 is a single LFM3 token, so the score token's top alternatives hold the distribution.
+    expected value keeps the model's uncertainty, which ranks listings far better. LFM3 writes each
+    value 1-100 as one token, so that token's top alternatives hold the distribution. Qwen-family
+    tokenizers write one token per digit; a two-digit score is then 10 * E[tens] + E[units].
     """
     scores: list[float] = []
     awaiting_value = False
@@ -513,15 +530,19 @@ def _expected_scores(logprob_tokens: list[dict[str, Any]]) -> list[float]:
             continue
         if not _SCORE_VALUE_TOKEN.fullmatch(text):
             continue
-        weights: dict[int, float] = {}
-        for alternative in token.get("top_logprobs") or []:
-            match = _SCORE_VALUE_TOKEN.fullmatch(str(alternative.get("token") or ""))
-            if match:
-                value = int(match.group(1))
-                weights[value] = weights.get(value, 0.0) + math.exp(float(alternative.get("logprob", -math.inf)))
-        total = sum(weights.values())
-        scores.append(sum(value * weight for value, weight in weights.items()) / total if total else float(text))
         awaiting_value = False
+        digits = [token]
+        for following_token in logprob_tokens[index + 1 : index + 3]:
+            if not _SCORE_DIGIT_TOKEN.fullmatch(str(following_token.get("token") or "")):
+                break
+            digits.append(following_token)
+        if len(digits) == 2 and _SCORE_DIGIT_TOKEN.fullmatch(text):
+            scores.append(10 * _expected_value(digits[0], _SCORE_DIGIT_TOKEN) + _expected_value(digits[1], _SCORE_DIGIT_TOKEN))
+        elif len(digits) == 1:
+            scores.append(_expected_value(token, _SCORE_VALUE_TOKEN))
+        else:
+            # A digit-split 100: rare and at the top of the scale, so the sampled value is used.
+            scores.append(float("".join(str(t.get("token") or "").strip() for t in digits)))
     return scores
 
 
