@@ -391,7 +391,9 @@ class SearchService:
             skipped: list[str] = []
             for draft in profile.generated_searches:
                 search = session.scalar(select(Search).where(Search.clothing_item == draft.clothing_item).limit(1))
-                if search is None:
+                # A draft without queries (a bucket the recompute omitted) would leave the search
+                # unable to run, so the search keeps its current configuration.
+                if search is None or not draft.queries:
                     skipped.append(draft.clothing_item)
                     continue
                 # Preserve user-owned sizes and budget — taste drafts only describe what to find.

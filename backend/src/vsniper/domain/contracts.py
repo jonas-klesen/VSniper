@@ -62,7 +62,7 @@ CLOTHING_ITEM_DESCRIPTIONS: dict[ClothingItem, str] = {
     "obenrum_warm": "Warm-weather tops such as T-shirts and short-sleeve shirts.",
     "obenrum_mittel": "Medium-layer tops such as longsleeves and light pullovers.",
     "obenrum_kalt": "Cold-weather knitwear such as heavy pullovers and cardigans.",
-    "jacken": "Jackets and coats, especially warm winter jackets.",
+    "jacken": "Warm winter jackets and coats such as down, quilted, and fleece jackets, parkas, and wool coats.",
     "kopf": "Headwear, especially funny or weird baseball caps.",
 }
 

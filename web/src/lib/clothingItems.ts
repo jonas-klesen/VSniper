@@ -6,7 +6,7 @@ export const clothingItems: { value: ClothingItem; label: string; description: s
   { value: 'obenrum_warm', label: 'Obenrum Warm', description: 'T-shirts and short-sleeve shirts' },
   { value: 'obenrum_mittel', label: 'Obenrum Mittel', description: 'Longsleeves and light pullovers' },
   { value: 'obenrum_kalt', label: 'Obenrum Kalt', description: 'Heavy knits and cardigans' },
-  { value: 'jacken', label: 'Jacken', description: 'Jackets and coats' },
+  { value: 'jacken', label: 'Jacken', description: 'Winter jackets and coats' },
   { value: 'kopf', label: 'Kopf', description: 'Funny or weird baseball caps' },
 ];
 

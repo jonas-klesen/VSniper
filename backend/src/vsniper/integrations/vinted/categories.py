@@ -21,7 +21,8 @@ _CATEGORY_FIELDS = {"category", "catalog"}
 #   warm    Tops & T-Shirts (T-shirts, shirts, polos, tank tops)
 #   mittel  light pullovers and hoodies from Pullover & Sweater
 #   kalt    winter knits and cardigans from Pullover & Sweater
-#   jacken  all Jacken & Mäntel
+#   jacken  the warm winter jackets and coats from Jacken & Mäntel (tree read 2026-11-09); light
+#           jackets, rain and trench coats, vests, and ponchos stay out
 FIXED_CATEGORIES_BY_ITEM: dict[ClothingItem, list[tuple[str, str]]] = {
     "schuhe": [("1242", "Sneaker"), ("1233", "Stiefel")],
     "hosen": [("34", "Hosen"), ("257", "Jeans")],
@@ -39,7 +40,16 @@ FIXED_CATEGORIES_BY_ITEM: dict[ClothingItem, list[tuple[str, str]]] = {
         ("1815", "Strickpullover für den Winter"),
         ("266", "Strickjacken"),
     ],
-    "jacken": [("1206", "Jacken & Mäntel")],
+    "jacken": [
+        ("2536", "Daunenjacken"),
+        ("2537", "Steppjacken"),
+        ("2539", "Ski- & Snowboard-Jacken"),
+        ("1858", "Fleecejacken"),
+        ("1227", "Parkas"),
+        ("1225", "Dufflecoats"),
+        ("2533", "Klassische & lange Mäntel"),
+        ("1861", "Cabans & Kurzmäntel"),
+    ],
     "kopf": [("86", "Hüte & Mützen")],
 }
 

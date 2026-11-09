@@ -161,3 +161,36 @@ def test_apply_generated_drafts_preserves_the_user_price_ceiling(monkeypatch, tm
         filters = [SearchFilter.model_validate(item) for item in search.filters]
     assert search.queries == ["retro sneaker", "skate schuh"]
     assert [filter_.values for filter_ in filters if filter_.field == "price"] == [["20"]]
+
+
+def test_apply_generated_drafts_keeps_a_search_whose_draft_has_no_queries(monkeypatch, tmp_path) -> None:
+    """A recompute can omit a bucket; its fallback draft has no queries and must not wipe the
+    bucket's working search (a search without queries cannot run)."""
+    service, factory = _setup(monkeypatch, tmp_path, grouped_sizes=[])
+    profile = TasteProfile(
+        version=5,
+        summary="",
+        taste_prompt="",
+        generated_searches=[
+            GeneratedSearchDraft(
+                id="draft-kopf",
+                clothing_item="kopf",
+                name="Kopf search",
+                queries=[],
+                region="de",
+                filters=[],
+                created_at=datetime.now(UTC),
+            )
+        ],
+    )
+    with factory() as session:
+        session.add(TasteState(id=1, taste_profile=profile.model_dump(mode="json")))
+        session.commit()
+
+    service.preferences = SimpleNamespace(get_taste_state=lambda session: session.get(TasteState, 1))
+
+    result = service.apply_generated_search_drafts(profile_version=5)
+
+    assert result.skipped == ["kopf"]
+    with factory() as session:
+        assert session.get(Search, "search-kopf").queries == ["q"]

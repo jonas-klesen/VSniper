@@ -24,7 +24,7 @@ EXPECTED_CATALOG_IDS = {
     "obenrum_warm": ["76"],
     "obenrum_mittel": ["1811", "267", "1812", "1813", "264", "265", "1814"],
     "obenrum_kalt": ["1815", "266"],
-    "jacken": ["1206"],
+    "jacken": ["2536", "2537", "2539", "1858", "1227", "1225", "2533", "1861"],
     "kopf": ["86"],
 }
 
@@ -115,5 +115,14 @@ def test_search_category_options_route_exposes_fixed_categories(monkeypatch) -> 
     assert kalt["default_aliases"] == kalt["allowed_aliases"] == ["Strickpullover für den Winter", "Strickjacken"]
     assert kalt["resolved_catalog_ids"] == EXPECTED_CATALOG_IDS["obenrum_kalt"]
     jacken = data["jacken"]
-    assert jacken["default_aliases"] == jacken["allowed_aliases"] == ["Jacken & Mäntel"]
+    assert jacken["default_aliases"] == jacken["allowed_aliases"] == [
+        "Daunenjacken",
+        "Steppjacken",
+        "Ski- & Snowboard-Jacken",
+        "Fleecejacken",
+        "Parkas",
+        "Dufflecoats",
+        "Klassische & lange Mäntel",
+        "Cabans & Kurzmäntel",
+    ]
     assert jacken["resolved_catalog_ids"] == EXPECTED_CATALOG_IDS["jacken"]

@@ -906,8 +906,8 @@ def test_vinted_client_sends_the_fixed_bucket_catalog_ids(monkeypatch) -> None:
         }
     )
     assert client.run_search(jackets, validate_session=False) == []
-    # Strickpullover für den Winter and Strickjacken; Jacken & Mäntel.
-    assert sent == ['1815,266', '1206']
+    # Strickpullover für den Winter and Strickjacken; the winter jacket and coat catalogs.
+    assert sent == ['1815,266', '2536,2537,2539,1858,1227,1225,2533,1861']
 
 
 def test_vinted_client_skips_unresolved_category_filters(monkeypatch) -> None:

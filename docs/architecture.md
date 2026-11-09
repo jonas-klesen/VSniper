@@ -47,7 +47,7 @@ Taste is modeled separately for seven clothing item buckets:
 - `obenrum_warm` / Obenrum Warm: warm-weather upper-body pieces such as T-shirts and short-sleeve shirts.
 - `obenrum_mittel` / Obenrum Mittel: mid-layer upper-body pieces such as longsleeves and light pullovers.
 - `obenrum_kalt` / Obenrum Kalt: cold-weather knitwear such as heavy pullovers and cardigans.
-- `jacken` / Jacken: jackets and coats, especially warm winter jackets.
+- `jacken` / Jacken: warm winter jackets and coats such as down, quilted, and fleece jackets, parkas, and wool coats.
 - `kopf` / Kopf: headwear, especially funny or weird baseball caps.
 
 Every wardrobe sample, generated search draft, saved search, candidate, reference observation, and feedback example carries one of these buckets.
