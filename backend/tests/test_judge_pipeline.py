@@ -18,7 +18,6 @@ import pytest
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from vsniper.core.database import Base
 from vsniper.db.models import AppSettingsState, Candidate, Search
@@ -39,17 +38,17 @@ from vsniper.services.search_service import SearchService
 
 
 @pytest.fixture(autouse=True)
-def memo_db(monkeypatch):
-    """In-memory DB so _memoized_judgments can query the candidates table.
+def memo_db(monkeypatch, tmp_path):
+    """File DB so _memoized_judgments can query the candidates table.
 
     The table is empty by default, so every candidate is judged; the memoization tests seed a
-    previously-judged row through the returned factory.
+    previously-judged row through the returned factory. A file with a connection pool, as in
+    production, because concurrent runs must not share one sqlite3 connection.
     """
     engine = create_engine(
-        "sqlite:///:memory:",
+        f"sqlite:///{tmp_path / 'judge.db'}",
         future=True,
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False, future=True)
@@ -1085,12 +1084,21 @@ def test_concurrent_runs_share_the_local_judge_slots() -> None:
                 _db_settings(vlm_judge_parallel_requests=2),
             )
 
-    runs = [threading.Thread(target=_run, args=(f"search-{n}",)) for n in range(3)]
+    errors: list[BaseException] = []
+
+    def _run_recording_errors(search_id: str) -> None:
+        try:
+            _run(search_id)
+        except BaseException as exc:  # noqa: BLE001 - a dead run would make max_active meaningless
+            errors.append(exc)
+
+    runs = [threading.Thread(target=_run_recording_errors, args=(f"search-{n}",)) for n in range(3)]
     for run in runs:
         run.start()
     for run in runs:
         run.join()
 
+    assert errors == []
     assert max_active == 2
 
 
