@@ -71,7 +71,7 @@ Use llama.cpp v0.8.0 or newer:
 
 ```bash
 llama-server -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M --alias qwen35-4b-clothing \
-  --host 0.0.0.0 --port 8080 --ctx-size 16384 --parallel 2 --reasoning off
+  --host 0.0.0.0 --port 8080 --ctx-size 16384 --parallel 1 --reasoning off
 ```
 
 - `-hf` downloads the model and its vision projector on the first start.
@@ -87,8 +87,9 @@ llama-server -hf unsloth/Qwen3.5-4B-GGUF:Q4_K_M --alias qwen35-4b-clothing \
   searches share that many requests, so none wait in the server past the
   client timeout.
 
-- `--ctx-size 16384 --parallel 2` gives each request 8192 tokens; a judgment
-  with one 768 px photo uses about 2,700.
+- On a CPU, one slot judges as fast as two or four (the slots share the cores)
+  with less memory and half the wait per request. A judgment with one 768 px
+  photo uses about 2,700 of the 16,384 context tokens.
 
 The small local judge ranks listings well but misses decisive details. Listings
 whose local score reaches the search threshold are therefore judged again by a
