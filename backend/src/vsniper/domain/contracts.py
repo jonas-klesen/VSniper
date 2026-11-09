@@ -12,7 +12,7 @@ ExtractionStatus = Literal["pending", "completed", "failed"]
 DeliveryStatus = Literal["not_queued", "pending", "processing", "sent", "failed"]
 AiProvider = Literal["openai", "cerebras", "local", "openrouter"]
 TasteSampleKind = Literal["wardrobe", "offer_like", "offer_dislike", "offer_note"]
-ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
+ClothingItem = Literal["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "jacken", "kopf"]
 
 # Default search threshold on the local judge's score. Its expected-value scores compress into
 # roughly 70-87, so the old default of 95 shortlisted nothing; 80 catches the top of that range.
@@ -52,6 +52,7 @@ CLOTHING_ITEM_LABELS: dict[ClothingItem, str] = {
     "obenrum_warm": "Obenrum Warm",
     "obenrum_mittel": "Obenrum Mittel",
     "obenrum_kalt": "Obenrum Kalt",
+    "jacken": "Jacken",
     "kopf": "Kopf",
 }
 
@@ -60,7 +61,8 @@ CLOTHING_ITEM_DESCRIPTIONS: dict[ClothingItem, str] = {
     "hosen": "Trousers, jeans, cargos, shorts, and other legwear.",
     "obenrum_warm": "Warm-weather tops such as T-shirts and short-sleeve shirts.",
     "obenrum_mittel": "Medium-layer tops such as longsleeves and light pullovers.",
-    "obenrum_kalt": "Cold-weather upper-body pieces such as heavy pullovers and jackets.",
+    "obenrum_kalt": "Cold-weather knitwear such as heavy pullovers and cardigans.",
+    "jacken": "Jackets and coats, especially warm winter jackets.",
     "kopf": "Headwear, especially funny or weird baseball caps.",
 }
 

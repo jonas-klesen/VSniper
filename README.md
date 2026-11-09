@@ -9,7 +9,7 @@ A Vinted clothes-discovery app that learns your taste from wardrobe photos and f
 - runs saved Vinted searches using an authenticated session
 - learns item-specific taste profiles from wardrobe photos, notes, and offer feedback
 - scores candidate listings with explainable 1–100 judgments
-- groups taste into six clothing buckets: shoes, trousers, warm/mid/cold upper-body pieces, and headwear
+- groups taste into seven clothing buckets: shoes, trousers, warm/mid/cold upper-body pieces, jackets, and headwear
 - sends high-scoring matches to Telegram and records like/dislike feedback
 - tracks AI usage and estimated costs
 

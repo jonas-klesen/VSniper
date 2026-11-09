@@ -40,13 +40,14 @@ A React dashboard for:
 
 ## Clothing item buckets
 
-Taste is modeled separately for six clothing item buckets:
+Taste is modeled separately for seven clothing item buckets:
 
 - `schuhe` / Schuhe: shoes and sneakers.
 - `hosen` / Hosen: trousers, jeans, cargos, shorts, and other legwear.
 - `obenrum_warm` / Obenrum Warm: warm-weather upper-body pieces such as T-shirts and short-sleeve shirts.
 - `obenrum_mittel` / Obenrum Mittel: mid-layer upper-body pieces such as longsleeves and light pullovers.
-- `obenrum_kalt` / Obenrum Kalt: cold-weather upper-body pieces such as proper pullovers and jackets.
+- `obenrum_kalt` / Obenrum Kalt: cold-weather knitwear such as heavy pullovers and cardigans.
+- `jacken` / Jacken: jackets and coats, especially warm winter jackets.
 - `kopf` / Kopf: headwear, especially funny or weird baseball caps.
 
 Every wardrobe sample, generated search draft, saved search, candidate, reference observation, and feedback example carries one of these buckets.

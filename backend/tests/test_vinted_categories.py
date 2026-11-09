@@ -23,7 +23,8 @@ EXPECTED_CATALOG_IDS = {
     "hosen": ["34", "257"],
     "obenrum_warm": ["76"],
     "obenrum_mittel": ["1811", "267", "1812", "1813", "264", "265", "1814"],
-    "obenrum_kalt": ["1815", "266", "1206"],
+    "obenrum_kalt": ["1815", "266"],
+    "jacken": ["1206"],
     "kopf": ["86"],
 }
 
@@ -66,8 +67,8 @@ def test_fixed_categories_are_exact_vinted_catalogs_without_overlap() -> None:
         ("Schuhe Frauen", ["schuhe"]),
         ("Hosen für Herren", ["hosen"]),
         ("Hüte für Erwachsene", ["kopf"]),
-        ("Anzugjacken für Herren", ["obenrum_kalt"]),
-        ("Kleidergrößen", ["obenrum_warm", "obenrum_mittel", "obenrum_kalt"]),
+        ("Anzugjacken für Herren", ["obenrum_kalt", "jacken"]),
+        ("Kleidergrößen", ["obenrum_warm", "obenrum_mittel", "obenrum_kalt", "jacken"]),
         ("Gürtel für Herren", []),
         ("Socken für Herren", []),
         # Regression: a generic/ambiguous account size-group label can legitimately describe
@@ -110,5 +111,8 @@ def test_search_category_options_route_exposes_fixed_categories(monkeypatch) -> 
     data = response.json()
     assert set(data) == set(CLOTHING_ITEM_LABELS)
     kalt = data["obenrum_kalt"]
-    assert kalt["default_aliases"] == kalt["allowed_aliases"] == ["Strickpullover für den Winter", "Strickjacken", "Jacken & Mäntel"]
+    assert kalt["default_aliases"] == kalt["allowed_aliases"] == ["Strickpullover für den Winter", "Strickjacken"]
     assert kalt["resolved_catalog_ids"] == EXPECTED_CATALOG_IDS["obenrum_kalt"]
+    jacken = data["jacken"]
+    assert jacken["default_aliases"] == jacken["allowed_aliases"] == ["Jacken & Mäntel"]
+    assert jacken["resolved_catalog_ids"] == EXPECTED_CATALOG_IDS["jacken"]

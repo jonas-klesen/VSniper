@@ -897,8 +897,17 @@ def test_vinted_client_sends_the_fixed_bucket_catalog_ids(monkeypatch) -> None:
     )
 
     assert client.run_search(search, validate_session=False) == []
-    # Strickpullover für den Winter, Strickjacken, Jacken & Mäntel.
-    assert sent == ['1815,266,1206']
+    jackets = search.model_copy(
+        update={
+            'id': 'search-jacken',
+            'name': 'Jacken',
+            'clothing_item': 'jacken',
+            'filters': [default_category_filter_for_clothing_item('jacken')],
+        }
+    )
+    assert client.run_search(jackets, validate_session=False) == []
+    # Strickpullover für den Winter and Strickjacken; Jacken & Mäntel.
+    assert sent == ['1815,266', '1206']
 
 
 def test_vinted_client_skips_unresolved_category_filters(monkeypatch) -> None:

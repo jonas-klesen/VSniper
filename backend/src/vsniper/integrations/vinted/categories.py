@@ -20,7 +20,8 @@ _CATEGORY_FIELDS = {"category", "catalog"}
 #
 #   warm    Tops & T-Shirts (T-shirts, shirts, polos, tank tops)
 #   mittel  light pullovers and hoodies from Pullover & Sweater
-#   kalt    winter knits and cardigans from Pullover & Sweater, plus all Jacken & Mäntel
+#   kalt    winter knits and cardigans from Pullover & Sweater
+#   jacken  all Jacken & Mäntel
 FIXED_CATEGORIES_BY_ITEM: dict[ClothingItem, list[tuple[str, str]]] = {
     "schuhe": [("1242", "Sneaker"), ("1233", "Stiefel")],
     "hosen": [("34", "Hosen"), ("257", "Jeans")],
@@ -37,8 +38,8 @@ FIXED_CATEGORIES_BY_ITEM: dict[ClothingItem, list[tuple[str, str]]] = {
     "obenrum_kalt": [
         ("1815", "Strickpullover für den Winter"),
         ("266", "Strickjacken"),
-        ("1206", "Jacken & Mäntel"),
     ],
+    "jacken": [("1206", "Jacken & Mäntel")],
     "kopf": [("86", "Hüte & Mützen")],
 }
 
@@ -60,6 +61,7 @@ SIZE_GROUP_KEYWORDS_BY_CLOTHING_ITEM: dict[ClothingItem, list[str]] = {
     "obenrum_warm": ["hemd", "shirt", "kleidergroesse"],
     "obenrum_mittel": ["hemd", "shirt", "kleidergroesse"],
     "obenrum_kalt": ["jacke", "pullover", "kleidergroesse"],
+    "jacken": ["jacke", "mantel", "maentel", "kleidergroesse"],
 }
 
 

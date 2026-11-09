@@ -13,6 +13,7 @@ from PIL import Image
 
 from vsniper.db.models import TasteSampleState
 from vsniper.domain.contracts import (
+    CLOTHING_ITEM_LABELS,
     CandidateJudgment,
     LabeledExample,
     ReferenceObservation,
@@ -1049,7 +1050,7 @@ def test_taste_recompute_uses_large_output_caps() -> None:
                                 "rationale": "utility",
                             },
                         }
-                        for item in ["schuhe", "hosen", "obenrum_warm", "obenrum_mittel", "obenrum_kalt", "kopf"]
+                        for item in CLOTHING_ITEM_LABELS
                     ],
                 }
             )
