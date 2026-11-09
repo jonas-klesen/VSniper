@@ -4,11 +4,11 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from threading import BoundedSemaphore, Event, Lock, Thread
+from threading import BoundedSemaphore, Condition, Event, Lock, Thread
 from typing import Any
 
 import httpx
@@ -170,7 +170,35 @@ _LISTING_PAGE_FETCHES = BoundedSemaphore(2)
 # A local judge server has a fixed number of slots, shared by every concurrently running search.
 # Requests beyond them queue inside the server, where they outlive the client timeout; the retries
 # then keep the server busy with abandoned work. Callers wait for a slot here instead.
-_local_judge_slots: dict[str, tuple[int, BoundedSemaphore]] = {}
+class _SlotLimiter:
+    """Requests in flight to one local judge server, bounded by the most recently configured count.
+
+    Runs read the count when they start, so after a settings change old and new runs disagree; one
+    limiter per server keeps them bounded together instead of each count getting its own slots.
+    """
+
+    def __init__(self, slots: int) -> None:
+        self._slots = slots
+        self._active = 0
+        self._changed = Condition()
+
+    @contextmanager
+    def acquire(self, slots: int) -> Iterator[None]:
+        with self._changed:
+            if slots != self._slots:
+                self._slots = slots
+                self._changed.notify_all()
+            self._changed.wait_for(lambda: self._active < self._slots)
+            self._active += 1
+        try:
+            yield
+        finally:
+            with self._changed:
+                self._active -= 1
+                self._changed.notify_all()
+
+
+_local_judge_slots: dict[str, _SlotLimiter] = {}
 _local_judge_slots_lock = Lock()
 
 # Listings judged under an older profile or another judge model that one run re-judges. After a
@@ -179,13 +207,10 @@ _local_judge_slots_lock = Lock()
 STALE_REJUDGES_PER_RUN = 10
 
 
-def _local_judge_slot(base_url: str, slots: int) -> BoundedSemaphore:
+def _local_judge_slot(base_url: str, slots: int) -> AbstractContextManager[None]:
     with _local_judge_slots_lock:
-        current = _local_judge_slots.get(base_url)
-        if current is None or current[0] != slots:
-            current = (slots, BoundedSemaphore(slots))
-            _local_judge_slots[base_url] = current
-        return current[1]
+        limiter = _local_judge_slots.setdefault(base_url, _SlotLimiter(slots))
+    return limiter.acquire(slots)
 
 
 class SearchRunAlreadyClaimed(RuntimeError):

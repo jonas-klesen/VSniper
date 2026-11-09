@@ -1102,6 +1102,55 @@ def test_concurrent_runs_share_the_local_judge_slots() -> None:
     assert max_active == 2
 
 
+def test_changing_the_slot_count_mid_run_keeps_the_local_judge_bounded() -> None:
+    """Changing Parallel requests while runs are in flight leaves runs that read the old count next
+    to runs that read the new one. Each switch between them created a fresh semaphore, so requests
+    in flight were no longer bounded and could again queue past the client timeout."""
+    taste = TasteProfile(summary="", taste_prompt="likes vintage")
+    jpeg = _jpeg()
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+    errors: list[BaseException] = []
+
+    def _judge(**kwargs) -> CandidateJudgment:
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        threading.Event().wait(0.02)
+        with lock:
+            active -= 1
+        return CandidateJudgment(score=60, explanation="ok", labels=[], concerns=[])
+
+    def _download(*, candidate_id: str, image_urls: list[str]) -> CandidateImageInput:
+        return CandidateImageInput(candidate_id=candidate_id, image_bytes=jpeg)
+
+    def _run(search_id: str, slots: int) -> None:
+        try:
+            service = _make_service()
+            service.taste_client.judge_candidate.side_effect = _judge
+            with patch.object(service, "_download_candidate_image", side_effect=_download):
+                _call_judge(
+                    service, [_raw(f"{search_id}-{i}") for i in range(8)], _search(search_id), taste,
+                    _db_settings(vlm_judge_parallel_requests=slots),
+                )
+        except BaseException as exc:  # noqa: BLE001 - a dead run would make max_active meaningless
+            errors.append(exc)
+
+    runs = [
+        threading.Thread(target=_run, args=(f"search-{n}", slots))
+        for n, slots in enumerate((2, 1, 2, 1))
+    ]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join()
+
+    assert errors == []
+    assert max_active <= 2
+
+
 def test_thresholds_changed_during_a_run_apply_to_its_later_decisions(memo_db) -> None:
     """Production 2026-11-09: a run that started before the verified alert score was raised from
     75 to 90 kept deciding with 75 for nine more hours and sent 89 alerts. Decisions use the
