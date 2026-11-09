@@ -932,3 +932,26 @@ def test_switching_verification_off_judges_with_the_local_judge_only(monkeypatch
     assert verifiers == ["gpt-verifier", None]
     assert snapshot.verify_enabled is False
     assert snapshot.verify_model_id == "model-verifier"
+
+
+def test_choosing_none_for_an_optional_model_clears_it(monkeypatch, tmp_path) -> None:
+    service, factory = _setup(monkeypatch, tmp_path)
+    _wire_run(service, factory, run_search=lambda *args, **kwargs: [])
+    service.update_app_settings(
+        SettingsUpdate(
+            vinted_region="de",
+            verify_model_id="model-default-judge",
+            judge_fallback_model_id="model-default-judge",
+        )
+    )
+
+    # The AI Models page sends null for "none"; a payload that leaves a field out keeps it.
+    kept = service.update_app_settings(SettingsUpdate.model_validate_json('{"vinted_region": "de"}'))
+    cleared = service.update_app_settings(
+        SettingsUpdate.model_validate_json(
+            '{"vinted_region": "de", "verify_model_id": null, "judge_fallback_model_id": null}'
+        )
+    )
+
+    assert (kept.verify_model_id, kept.judge_fallback_model_id) == ("model-default-judge", "model-default-judge")
+    assert (cleared.verify_model_id, cleared.judge_fallback_model_id) == (None, None)

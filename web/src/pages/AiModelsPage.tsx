@@ -355,7 +355,7 @@ export function AiModelsPage() {
           </section>
         </div>
         <div className="button-row" style={{ marginTop: '1rem' }}>
-          <button onClick={() => saveAiSettingsMutation.mutate(aiSettings)} disabled={saveAiSettingsMutation.isPending || !aiSettingsDirty}>
+          <button onClick={() => saveAiSettingsMutation.mutate(aiSettings)} disabled={saveAiSettingsMutation.isPending || !aiSettingsDirty || !settingsQuery.data}>
             {saveAiSettingsMutation.isPending ? 'Saving…' : 'Save AI configuration'}
           </button>
           {saveAiSettingsMutation.isSuccess && <span className="muted">Saved.</span>}

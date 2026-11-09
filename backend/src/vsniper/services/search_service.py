@@ -1680,7 +1680,8 @@ class SearchService:
             model.telegram_configured = telegram_configured
             if payload.judge_model_id is not None:
                 model.judge_model_id = payload.judge_model_id or None
-            if payload.judge_fallback_model_id is not None:
+            # Optional models: an explicit null ("none") clears them; an omitted field keeps them.
+            if "judge_fallback_model_id" in payload.model_fields_set:
                 model.judge_fallback_model_id = payload.judge_fallback_model_id or None
             if payload.learn_model_id is not None:
                 model.learn_model_id = payload.learn_model_id or None
@@ -1688,7 +1689,7 @@ class SearchService:
                 model.observation_model_id = payload.observation_model_id or None
             if payload.verify_enabled is not None:
                 model.verify_enabled = payload.verify_enabled
-            if payload.verify_model_id is not None:
+            if "verify_model_id" in payload.model_fields_set:
                 model.verify_model_id = payload.verify_model_id or None
             if payload.verify_alert_threshold is not None:
                 model.verify_alert_threshold = payload.verify_alert_threshold
