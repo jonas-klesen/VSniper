@@ -1090,6 +1090,34 @@ def test_taste_recompute_uses_large_output_caps() -> None:
         assert draft.filters == [default_category_filter_for_clothing_item(draft.clothing_item)]
 
 
+def test_truncated_taste_profile_raises_instead_of_parsing_a_fragment() -> None:
+    """A recompute that hit the output cap returned cut-off JSON; the parser then fell back to the
+    first complete inner array and failed with an opaque validation error."""
+    truncated = '{"likes": ["bold pattern", "boxy shape"], "item_profiles": [{"taste_prompt": "You like'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": truncated}]}],
+            },
+        )
+
+    client = _mock_openai_client(handler)
+    with pytest.raises(OpenAIIntegrationError, match="output token limit"):
+        client.build_taste_profile(
+            observations=[],
+            notes=[],
+            liked_examples=[],
+            disliked_examples=[],
+            previous_profile=None,
+            model="gpt-5.5",
+            reasoning_effort="medium",
+        )
+
+
 def test_describe_reference_images_attaches_by_echoed_image_id() -> None:
     def _obs(image_id: str) -> dict:
         return {

@@ -45,7 +45,9 @@ OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 CEREBRAS_API_BASE_URL = "https://api.cerebras.ai/v1"
 OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
 REFERENCE_OBSERVATIONS_MAX_OUTPUT_TOKENS = 12000
-TASTE_PROFILE_MAX_OUTPUT_TOKENS = 16000
+# Reasoning tokens count against this cap. A seven-bucket recompute used all of 16000 on 2026-11-09
+# (earlier six-bucket runs used 6-8k); billing follows actual use, not the cap.
+TASTE_PROFILE_MAX_OUTPUT_TOKENS = 32000
 CANDIDATE_OBSERVATION_OPENROUTER_TOKEN_BUDGETS = (4000, 8000)
 # Reasoning tokens count against max_tokens on OpenRouter; reserve room before the JSON.
 OPENROUTER_JUDGE_REASONING_HEADROOM_TOKENS = 2000
@@ -1547,6 +1549,12 @@ class OpenAITasteClient:
             schema=TASTE_PROFILE_SCHEMA,
         )
         self._emit_usage("build_taste_profile", model_name, payload, on_usage=on_usage)
+        # Cut-off JSON can still parse to an inner fragment, so reject truncated output outright.
+        if payload.get("status") == "incomplete":
+            reason = (payload.get("incomplete_details") or {}).get("reason") or "unknown"
+            if reason == "max_output_tokens":
+                reason = f"output token limit of {TASTE_PROFILE_MAX_OUTPUT_TOKENS} reached"
+            raise OpenAIIntegrationError(f"Taste profile response was cut off: {reason}.")
         parsed = _TasteProfilePayload.model_validate(_parse_json_output(payload))
         version = (previous_profile.version + 1) if previous_profile else 1
         now = datetime.now(UTC)
