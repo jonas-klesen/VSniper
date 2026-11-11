@@ -64,6 +64,9 @@ def _record_worker_error(operation: str, summary: str, exc: BaseException) -> No
 
 def _run_one(search_id: str, search_name: str, interval: int) -> None:
     state = get_state()
+    if state.searches.vinted_session_rejected():
+        _logger.info("skipping '%s': Vinted rejected the session; save a new cookie to resume", search_name)
+        return
     if not state.searches.claim_for_run(
         search_id, timedelta(seconds=interval), stale_after=_WORKER_CLAIM_STALE_AFTER
     ):

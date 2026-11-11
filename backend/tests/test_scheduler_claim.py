@@ -18,6 +18,9 @@ def test_worker_passes_explicit_stale_after_to_claim(monkeypatch) -> None:
     captured: dict = {}
 
     class FakeSearches:
+        def vinted_session_rejected(self):
+            return False
+
         def claim_for_run(self, search_id, min_interval, *, stale_after=None):
             captured["min_interval"] = min_interval
             captured["stale_after"] = stale_after
@@ -30,3 +33,21 @@ def test_worker_passes_explicit_stale_after_to_claim(monkeypatch) -> None:
 
     assert captured["min_interval"] == timedelta(seconds=60)
     assert captured["stale_after"] == scheduler._WORKER_CLAIM_STALE_AFTER
+
+
+def test_worker_does_not_scan_while_the_vinted_session_is_rejected(monkeypatch) -> None:
+    claimed: list[str] = []
+
+    class FakeSearches:
+        def vinted_session_rejected(self):
+            return True
+
+        def claim_for_run(self, search_id, min_interval, *, stale_after=None):
+            claimed.append(search_id)
+            return False
+
+    monkeypatch.setattr(scheduler, "get_state", lambda: type("S", (), {"searches": FakeSearches()})())
+
+    scheduler._run_one("s1", "Search", interval=60)
+
+    assert claimed == []

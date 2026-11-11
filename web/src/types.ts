@@ -377,7 +377,7 @@ export type SettingsSnapshot = {
   blocked_brands: string[];
   session_health: {
     region: string;
-    status: 'healthy' | 'warning' | 'missing';
+    status: 'healthy' | 'warning' | 'missing' | 'rejected';
     last_validated_at: string | null;
     detail: string;
   };

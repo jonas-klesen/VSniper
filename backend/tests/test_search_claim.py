@@ -732,6 +732,63 @@ def test_scan_run_records_vinted_session_failure(monkeypatch, tmp_path) -> None:
     assert run.error == "Vinted rejected the configured cookie/session."
 
 
+def _record_errors(service) -> list[dict]:
+    recorded: list[dict] = []
+    service.errors = type("Errors", (), {"record": staticmethod(lambda **kwargs: recorded.append(kwargs))})()
+    return recorded
+
+
+def test_rejected_session_pauses_scans_and_reports_once(monkeypatch, tmp_path) -> None:
+    service, factory = _setup(monkeypatch, tmp_path)
+
+    def session_failure(*args, **kwargs):
+        raise VintedSessionError("Vinted rejected the configured cookie/session.", retryable=False)
+
+    _wire_run(service, factory, run_search=session_failure)
+    recorded = _record_errors(service)
+    assert service.vinted_session_rejected() is False
+
+    for _ in range(3):
+        _set(factory, run_status="running", last_claimed_at=datetime.now(UTC))
+        with pytest.raises(VintedSessionError):
+            service._run("s1", mode="live")
+
+    # Every failed run is still in the run history, but a dead session is reported once.
+    assert service.vinted_session_rejected() is True
+    assert len(recorded) == 1
+    assert "paused" in recorded[0]["summary"]
+
+
+def test_other_run_failures_do_not_pause_scans(monkeypatch, tmp_path) -> None:
+    service, factory = _setup(monkeypatch, tmp_path)
+    _wire_run(service, factory, run_search=_boom)
+    recorded = _record_errors(service)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            service._run("s1", mode="live")
+
+    assert service.vinted_session_rejected() is False
+    assert len(recorded) == 2
+
+
+def test_saving_a_new_cookie_resumes_paused_scans(monkeypatch, tmp_path) -> None:
+    service, factory = _setup(monkeypatch, tmp_path)
+
+    def session_failure(*args, **kwargs):
+        raise VintedSessionError("Vinted rejected the configured cookie/session.", retryable=False)
+
+    _wire_run(service, factory, run_search=session_failure)
+    _record_errors(service)
+    with pytest.raises(VintedSessionError):
+        service._run("s1", mode="live")
+    assert service.vinted_session_rejected() is True
+
+    service.update_app_settings(SettingsUpdate(vinted_region="de", vinted_cookie="access_token_web=new"))
+
+    assert service.vinted_session_rejected() is False
+
+
 def test_failed_preview_does_not_touch_a_concurrent_live_claim(monkeypatch, tmp_path) -> None:
     service, factory = _setup(monkeypatch, tmp_path)
     _wire_run(service, factory, run_search=_boom)

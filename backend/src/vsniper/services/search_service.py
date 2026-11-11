@@ -1333,12 +1333,21 @@ class SearchService:
             # reclaim and re-scan mid-run. The preview's exception still propagates to its caller.
             if mode == "live":
                 self._mark_run_failed(search_id)
+            session_rejected = isinstance(exc, VintedSessionError)
+            newly_rejected = session_rejected and self._reject_vinted_session(
+                region=search_record.region, detail=str(exc)
+            )
             errors = getattr(self, "errors", None)
-            if errors is not None:
+            # A dead session fails every run until a new cookie is saved; report it once.
+            if errors is not None and (newly_rejected or not session_rejected):
                 errors.record(
                     source="search",
                     operation="run_search",
-                    summary="Search run failed",
+                    summary=(
+                        "Vinted session rejected; scans paused until a new cookie is saved"
+                        if newly_rejected
+                        else "Search run failed"
+                    ),
                     exception=exc,
                     details={
                         "search_id": search_id,
@@ -1643,6 +1652,28 @@ class SearchService:
         without a process restart."""
         with session_scope() as session:
             return self._get_settings_state(session).scan_interval_seconds
+
+    def vinted_session_rejected(self) -> bool:
+        """True while scheduled scans should pause: Vinted refused the stored session and no
+        cookie has been saved since."""
+        with session_scope() as session:
+            return (self._get_settings_state(session).session_health or {}).get("status") == "rejected"
+
+    def _reject_vinted_session(self, *, region: str, detail: str) -> bool:
+        """Marks the stored session rejected. Returns True only for the call that changed it, so
+        concurrent failing runs agree on a single report."""
+        health = SessionHealth(
+            region=region, status="rejected", last_validated_at=datetime.now(UTC), detail=detail[:500]
+        )
+        current_status = func.coalesce(func.json_extract(AppSettingsState.session_health, "$.status"), "")
+        with session_scope() as session:
+            result = session.execute(
+                update(AppSettingsState)
+                .where(AppSettingsState.id == 1)
+                .where(current_status != "rejected")
+                .values(session_health=health.model_dump(mode="json"))
+            )
+            return result.rowcount == 1
 
     def update_app_settings(self, payload: SettingsUpdate) -> SettingsSnapshot:
         # Phase 1 — read txn: resolve the effective cookie/region the health fetch will use

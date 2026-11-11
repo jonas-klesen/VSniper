@@ -405,7 +405,9 @@ class JudgmentPromptPreview(BaseModel):
 
 class SessionHealth(BaseModel):
     region: str
-    status: Literal["healthy", "warning", "missing"]
+    # "rejected": a scan was refused by Vinted; scheduled scans stay paused until a newly
+    # saved cookie replaces this health.
+    status: Literal["healthy", "warning", "missing", "rejected"]
     last_validated_at: datetime | None
     detail: str
 
